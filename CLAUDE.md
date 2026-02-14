@@ -8,17 +8,57 @@ Audio identification and fingerprinting application. FastAPI backend + SvelteKit
 # Prerequisites: asdf (nodejs, python, pnpm, uv), Docker
 asdf install            # installs tool versions from .tool-versions
 make install            # installs Python + Node dependencies
-make dev                # starts postgres, service (port 17010), UI (port 17000)
+make dev                # starts postgres, qdrant, service (port 17010), UI (port 17000)
 ```
+
+## System Dependencies
+
+The following system libraries must be installed before `make install`. They are NOT managed by uv or pnpm.
+
+### macOS (Homebrew)
+
+```bash
+brew install ffmpeg fftw lmdb chromaprint libmagic
+```
+
+### Ubuntu/Debian
+
+```bash
+apt-get update && apt-get install -y \
+  ffmpeg libfftw3-dev liblmdb-dev libchromaprint-dev libmagic1 build-essential
+```
+
+### Verification
+
+```bash
+ffmpeg -version | head -1        # >= 5.0 required
+pkg-config --libs fftw3f         # Olaf dependency
+pkg-config --libs lmdb           # Olaf dependency
+which fpcalc                     # Chromaprint CLI (used by pyacoustid)
+python -c "import magic"         # python-magic (requires libmagic)
+```
+
+### Docker
+
+All system dependencies are bundled in the service Docker image. Use Docker if host installation is problematic.
 
 ## How to Run
 
 ```bash
-make dev                # starts everything (postgres + service + UI)
+make dev                # starts everything (postgres + qdrant + service + UI)
 make test               # runs pytest + vitest
 make lint               # ruff check + eslint
 make fmt                # ruff format + prettier
 make typecheck          # pyright + svelte-check
+make docker-up          # starts only Docker services (postgres + qdrant)
+make docker-down        # stops all Docker services
+```
+
+## Data Management
+
+```bash
+make ingest AUDIO_DIR=/path/to/mp3s   # ingest audio files into all stores
+make rebuild-index                     # drop Olaf + Qdrant, re-index from raw audio
 ```
 
 ## Project Layout
@@ -27,7 +67,7 @@ make typecheck          # pyright + svelte-check
 audio-ident-service/    # FastAPI backend (Python, port 17010)
 audio-ident-ui/         # SvelteKit frontend (TypeScript, port 17000)
 docs/                   # Shared documentation
-docker-compose.yml      # PostgreSQL
+docker-compose.yml      # PostgreSQL + Qdrant
 Makefile                # Developer UX entry point
 ```
 
@@ -39,6 +79,12 @@ Makefile                # Developer UX entry point
 - Ports are configurable via environment variables (`SERVICE_PORT`, `UI_PORT`)
 - Database credentials: `audio_ident` / `audio_ident` / `audio_ident` (dev only)
 - API routes: `/health` (no prefix), `/api/v1/*` (versioned)
+- Docker services require profiles: `make dev` handles this automatically. Do NOT use `docker compose up -d` directly (nothing will start). Use `make docker-up` or `make dev`.
+- To start infrastructure without the service: `docker compose --profile postgres --profile qdrant up -d`
+- Do NOT run multiple `make ingest` processes simultaneously (Olaf LMDB is single-writer)
+- Do NOT manually modify Olaf LMDB files or Qdrant collections — use `make rebuild-index` for recovery
+- Do NOT ingest files shorter than 3 seconds or longer than 30 minutes
+- If ingestion crashes mid-batch, re-run `make ingest` — SHA-256 dedup will skip already-ingested files
 
 ## Guard-rails / Non-goals
 
@@ -48,6 +94,8 @@ Makefile                # Developer UX entry point
 - Do NOT modify generated files in `audio-ident-ui/src/lib/api/generated.ts`
 - No microservices — single service, single UI
 - No server-side rendering that depends on service availability at build time
+- `make gen-client` requires the backend to be running (`make dev`). If the backend cannot start, fix backend issues first before attempting frontend type generation.
+- As a fallback, commit the generated `openapi.json` to the repo so types can be regenerated from the static file.
 
 ## How to Add a New Endpoint
 
@@ -60,6 +108,16 @@ Makefile                # Developer UX entry point
 7. Copy the contract: `cp audio-ident-service/docs/api-contract.md audio-ident-ui/docs/`
 8. Use generated types in UI code
 9. Write UI tests
+
+## Implementation Sequencing
+
+When adding new endpoints:
+1. Update the API contract FIRST (this is a blocking prerequisite)
+2. Copy contract to all three locations
+3. THEN implement backend schemas and routes
+4. THEN regenerate frontend types
+
+Never implement code before the contract is updated and copied.
 
 ## The Golden Rule: API Contract is FROZEN
 
