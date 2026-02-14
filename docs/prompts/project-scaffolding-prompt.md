@@ -1,5 +1,7 @@
 # Goal: Scaffold a service backend and ui frontend from scratch
 
+## Project Overview
+Audio-ident is an audio identification and fingerprinting application. The system provides a service backend for audio analysis and a web-based UI for interaction.
 
 You are Claude Code with filesystem access. Scaffold a new **monorepo** project with a SvelteKit frontend and FastAPI python backend according to the following specifications.
 
@@ -12,34 +14,35 @@ audio-ident refers to the overall project naming scheme. You must prompt the use
 
 ## Hard constraints
 - Monorepo layout:
-- `audio-ident-ui/` = SvelteKit frontend
-- `audio-ident-service/` = FastAPI backend
-- `docs/` = project docs
+  - `audio-ident-ui/` = SvelteKit frontend
+  - `audio-ident-service/` = FastAPI backend
+  - `docs/` = project docs
 - Include a root `Makefile` that provides a single, consistent developer UX.
-- Include `asdf` `.tool-versions` at repo root (and/or in subprojects as required to fulfill tooling requirements).
+- Include `asdf` `.tool-versions` at repo root (and/or in subprojects as required to fulfill tooling requirements). The `.tool-versions` file must include a `nodejs` entry (e.g., `nodejs 22.14.0` or a current LTS version) in addition to the Python version.
 
 
 ## Deliverable: a runnable vertical slice (non-negotiable)
 When done, a dev can run:
 - `make dev` → starts app + service + postgres
-- app loads in browser and shows “API reachable” using real API calls
-- service exposes:
-- `GET /health` (200)
-- `GET /api/v1/version` (returns name + git sha + build time)
-- app calls the service using **TanStack Query** and displays results.
+- App loads in browser and shows "API reachable" using real API calls
+- Service exposes:
+  - `GET /health` (200)
+  - `GET /api/v1/version` (returns name + git sha + build time)
+- App calls the service using **TanStack Query** and displays results.
 
 
 ## Stack requirements
 
 
 ### audio-ident-ui/ stack (SvelteKit)
-- SvelteKit + TypeScript + Vite
+- **Package manager**: `pnpm` (preferred for monorepos)
+- SvelteKit + Svelte 5 + TypeScript + Vite
+- Svelte 5 runes (`$state`, `$derived`, `$effect`) for UI state; server state via TanStack Query
 - Tailwind CSS
 - shadcn-svelte
 - Lucide icons
 - SvelteKit Forms (progressive enhancement where relevant)
 - Zod validation
-- Svelte stores (only for UI state; server state via TanStack Query)
 - TanStack Query (Svelte)
 - ESLint + Prettier + svelte-check
 - Vitest (at least 1 test)
@@ -55,8 +58,8 @@ When done, a dev can run:
 - Alembic migrations
 - Pydantic v2
 - Auth scaffolding: OAuth2 + JWT (stubs are fine, but structure must exist)
-- libs: python-jose + passlib[bcrypt] (or argon2 if you prefer)
-- Ruff + Black + mypy or pyright
+- libs: PyJWT (or joserfc) + argon2-cffi
+- Ruff (linting + formatting) + mypy or pyright
 - pytest (at least 1 test)
 - `.env.example` and `pydantic-settings` config
 
@@ -64,23 +67,24 @@ When done, a dev can run:
 ## API contract discipline (must implement)
 - Service must publish OpenAPI (built-in).
 - Repo must include `make gen-client` that generates a typed TypeScript client from the service OpenAPI and places it in `src/lib/api/` (or similar).
+  - **Note**: The service must be running for `make gen-client` to fetch the live OpenAPI spec. Alternatively, support generating from a saved spec file (e.g., `make gen-client-from-file SPEC=docs/openapi.json`).
 - App must import and use that generated client (no hand-rolled fetch wrappers for the vertical slice).
 
 
 ## Repo-level tooling / structure (must implement)
 - Root `Makefile` targets (minimum):
-- `make install` (installs all dependencis and prepares the environment)`
-- `make dev` (runs everything)
-- `make test` (runs all tests)
-- `make lint` / `make fmt`
-- `make typecheck`
-- `make gen-client`
-- `make db-up` / `make db-reset` (drop + recreate + migrate)
+  - `make install` (installs all dependencies and prepares the environment)
+  - `make dev` (runs everything)
+  - `make test` (runs all tests)
+  - `make lint` / `make fmt`
+  - `make typecheck`
+  - `make gen-client`
+  - `make db-up` / `make db-reset` (drop + recreate + migrate)
 - `docker-compose.yml` for Postgres (and optional pgadmin if you want).
 - Database migrations:
-- `service/` has an initial Alembic migration for the vertical slice resource.
+  - `audio-ident-service/` has an initial Alembic migration for the vertical slice resource.
 - Docs:
-- `docs/README.md` describing how to run, test, and generate client.
+  - `docs/README.md` describing how to run, test, and generate client.
 
 
 ## CLAUDE.md
@@ -93,9 +97,9 @@ Create `CLAUDE.md` at repo root, plus minimal `audio-ident-ui/CLAUDE.md` and `au
 
 
 ## Implementation notes
-- Keep it minimal but complete. No “future work” placeholders without wiring.
-- Prefer clean structure: `service/app/` (routers, db, models, schemas, settings), `service/tests/`.
-- Prefer `app/src/routes/` + `app/src/lib/` organization.
+- Keep it minimal but complete. No "future work" placeholders without wiring.
+- Prefer clean structure: `audio-ident-service/app/` (routers, db, models, schemas, settings), `audio-ident-service/tests/`.
+- Prefer `audio-ident-ui/src/routes/` + `audio-ident-ui/src/lib/` organization.
 
 
 ## Done when
@@ -115,11 +119,12 @@ The scaffolded UI and Service must use a unique set of ports for each service to
 2. The UI must be accessible using a public hostname and port.
    2a) You must prompt the user to select the UI port, for example port 15000
 3. **CRITICAL** Both UI and Service projects must provide the ability to easily change the ports and any other configurables using .env file settings with example defaults provided in .env.example
+4. The service `.env.example` must include `CORS_ORIGINS=http://localhost:{UI_PORT}` (using the user-chosen UI port) so that FastAPI CORS configuration stays aligned with the actual frontend origin.
 
 
 We are scaffolding a UI and Service projects where the UI will issue REST API calls to the Service.
-This requires following an API contract referenced by CLAUDE.md in the monoreport root and CLAUDE.md files in each subproject.
-The contract referenced from all three CLAUDE.md files should be present in each repo's docs/api-controract.md file.
+This requires following an API contract referenced by CLAUDE.md in the monorepo root and CLAUDE.md files in each subproject.
+The contract referenced from all three CLAUDE.md files should be present in each repo's docs/api-contract.md file.
 
 
 The contract rules are:
@@ -591,7 +596,7 @@ High volume list endpoints use consistent pagination. You must ask the user to d
 | Parameter  | Type    | Default | Max | Description |
 |------------|---------|---------|-----|-------------|
 | `page`     | integer | 1       | -   | 1-indexed page number |
-| `pageSize` | integer | 50      | 200 | Items per page |
+| `pageSize` | integer | 50      | 100 | Items per page |
 
 
 
