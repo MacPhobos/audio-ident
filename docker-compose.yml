@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: audio_ident
+      POSTGRES_USER: audio_ident
+      POSTGRES_PASSWORD: audio_ident
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U audio_ident"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

@@ -1,0 +1,11 @@
+# Package managers
+package-lock.json
+pnpm-lock.yaml
+
+# Build output
+.svelte-kit
+build
+dist
+
+# Generated
+src/lib/api/generated.ts
