@@ -30,11 +30,14 @@ MIN_QUERY_DURATION = 3.0  # seconds
 
 ALLOWED_MIME_TYPES: dict[str, str] = {
     "audio/webm": "webm",
+    "video/webm": "webm",
     "audio/ogg": "ogg",
     "audio/mpeg": "mp3",
     "audio/mp4": "mp4",
     "audio/wav": "wav",
     "audio/x-wav": "wav",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
 }
 
 
@@ -83,7 +86,7 @@ async def _validate_upload(audio: UploadFile) -> bytes | JSONResponse:
     if len(content) == 0:
         return _error_response(
             400,
-            "FILE_TOO_LARGE",
+            "EMPTY_FILE",
             "Empty file uploaded. Please provide an audio file.",
         )
 
@@ -168,7 +171,21 @@ async def search_audio(
             f"Audio too short: {duration:.1f}s (minimum {MIN_QUERY_DURATION:.0f}s).",
         )
 
-    # 4. Orchestrate search (parallel lanes with timeouts)
+    # 4. Check CLAP model availability for vibe-dependent modes
+    clap_model = getattr(request.app.state, "clap_model", None)
+    clap_processor = getattr(request.app.state, "clap_processor", None)
+
+    if clap_model is None and mode == SearchMode.VIBE:
+        return _error_response(
+            503,
+            "SERVICE_UNAVAILABLE",
+            "Embedding model not available. Try mode=exact.",
+        )
+    if clap_model is None and mode == SearchMode.BOTH:
+        logger.warning("CLAP model not loaded; downgrading mode=both to mode=exact")
+        mode = SearchMode.EXACT
+
+    # 5. Orchestrate search (parallel lanes with timeouts)
     try:
         response = await orchestrate_search(
             pcm_16k=pcm_16k,
@@ -176,13 +193,13 @@ async def search_audio(
             mode=mode,
             max_results=max_results,
             qdrant_client=request.app.state.qdrant,
-            clap_model=getattr(request.app.state, "clap_model", None),
-            clap_processor=getattr(request.app.state, "clap_processor", None),
+            clap_model=clap_model,
+            clap_processor=clap_processor,
         )
     except SearchUnavailableError:
         return _error_response(
             503,
-            "SEARCH_UNAVAILABLE",
+            "SERVICE_UNAVAILABLE",
             "Search service temporarily unavailable. Please retry.",
         )
     except SearchTimeoutError:

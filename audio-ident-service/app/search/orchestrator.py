@@ -91,15 +91,25 @@ async def orchestrate_search(
     vibe_matches: list[VibeMatch] = []
 
     if mode == SearchMode.EXACT:
-        exact_matches = await _run_exact_with_timeout(pcm_16k, max_results)
+        try:
+            exact_matches = await _run_exact_with_timeout(pcm_16k, max_results)
+        except TimeoutError:
+            raise SearchTimeoutError("Exact search lane timed out") from None
+        except Exception as exc:
+            raise SearchUnavailableError("Exact search lane failed") from exc
     elif mode == SearchMode.VIBE:
-        vibe_matches = await _run_vibe_with_timeout(
-            pcm_48k,
-            max_results,
-            qdrant_client=qdrant_client,
-            clap_model=clap_model,
-            clap_processor=clap_processor,
-        )
+        try:
+            vibe_matches = await _run_vibe_with_timeout(
+                pcm_48k,
+                max_results,
+                qdrant_client=qdrant_client,
+                clap_model=clap_model,
+                clap_processor=clap_processor,
+            )
+        except TimeoutError:
+            raise SearchTimeoutError("Vibe search lane timed out") from None
+        except Exception as exc:
+            raise SearchUnavailableError("Vibe search lane failed") from exc
     else:
         # BOTH mode: run lanes in parallel
         exact_matches, vibe_matches = await _run_both_lanes(

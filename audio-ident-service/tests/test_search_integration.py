@@ -376,7 +376,7 @@ class TestSearchValidation:
         assert data["error"]["code"] == "AUDIO_TOO_SHORT"
 
     async def test_zero_byte_upload(self, search_client: AsyncClient):
-        """Upload an empty file -> 400."""
+        """Upload an empty file -> 400 EMPTY_FILE."""
         resp = await search_client.post(
             "/api/v1/search",
             files={"audio": ("empty.mp3", b"", "audio/mpeg")},
@@ -385,7 +385,7 @@ class TestSearchValidation:
 
         assert resp.status_code == 400
         data = resp.json()
-        assert data["error"]["code"] == "FILE_TOO_LARGE"
+        assert data["error"]["code"] == "EMPTY_FILE"
 
     async def test_decode_failure(self, search_client: AsyncClient):
         """Upload audio that fails to decode -> 400 UNSUPPORTED_FORMAT."""
@@ -455,7 +455,7 @@ class TestSearchLaneFailures:
         assert len(data["vibe_matches"]) == 0
 
     async def test_both_lanes_fail_returns_503(self, search_client: AsyncClient):
-        """Both lanes fail -> 503 SEARCH_UNAVAILABLE."""
+        """Both lanes fail -> 503 SERVICE_UNAVAILABLE."""
         pcm_16k = _make_pcm_bytes(5.0, sample_rate=16000)
         pcm_48k = _make_pcm_bytes(5.0, sample_rate=48000)
 
@@ -479,7 +479,7 @@ class TestSearchLaneFailures:
 
         assert resp.status_code == 503
         data = resp.json()
-        assert data["error"]["code"] == "SEARCH_UNAVAILABLE"
+        assert data["error"]["code"] == "SERVICE_UNAVAILABLE"
 
     async def test_both_lanes_timeout_returns_504(self, search_client: AsyncClient):
         """Both lanes timeout -> 504 SEARCH_TIMEOUT."""
@@ -711,3 +711,336 @@ class TestOrchestrator:
                     clap_model=MagicMock(),
                     clap_processor=MagicMock(),
                 )
+
+    async def test_orchestrate_exact_timeout_raises_search_timeout(self):
+        """mode=exact, exact lane times out -> SearchTimeoutError."""
+        from app.search.orchestrator import SearchTimeoutError, orchestrate_search
+
+        async def slow_exact(*args, **kwargs):
+            await asyncio.sleep(10)
+            return []
+
+        with (
+            patch("app.search.orchestrator.run_exact_lane", side_effect=slow_exact),
+            patch("app.search.orchestrator.EXACT_TIMEOUT_SECONDS", 0.1),
+            pytest.raises(SearchTimeoutError, match="Exact search lane timed out"),
+        ):
+            await orchestrate_search(
+                pcm_16k=b"fake_pcm",
+                pcm_48k=b"fake_pcm",
+                mode=SearchMode.EXACT,
+                max_results=10,
+                qdrant_client=MagicMock(),
+                clap_model=MagicMock(),
+                clap_processor=MagicMock(),
+            )
+
+    async def test_orchestrate_vibe_error_raises_unavailable(self):
+        """mode=vibe, vibe lane throws -> SearchUnavailableError."""
+        from app.search.orchestrator import SearchUnavailableError, orchestrate_search
+
+        with (
+            patch(
+                "app.search.orchestrator.run_vibe_lane", new_callable=AsyncMock
+            ) as mock_vibe_lane,
+            patch("app.search.orchestrator.async_session_factory") as mock_session_factory,
+        ):
+            mock_session = AsyncMock()
+            mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_vibe_lane.side_effect = ValueError("CLAP model error")
+
+            with pytest.raises(SearchUnavailableError, match="Vibe search lane failed"):
+                await orchestrate_search(
+                    pcm_16k=b"fake_pcm",
+                    pcm_48k=b"fake_pcm",
+                    mode=SearchMode.VIBE,
+                    max_results=10,
+                    qdrant_client=MagicMock(),
+                    clap_model=MagicMock(),
+                    clap_processor=MagicMock(),
+                )
+
+
+# ---------------------------------------------------------------------------
+# Test: Single-lane failures at the HTTP level (504 / 503)
+# ---------------------------------------------------------------------------
+
+
+class TestSingleLaneHTTPErrors:
+    """Tests that single-lane failures produce correct HTTP status codes."""
+
+    async def test_exact_lane_timeout_returns_504(self, search_client: AsyncClient):
+        """mode=exact, exact lane times out -> 504 SEARCH_TIMEOUT."""
+        pcm_16k = _make_pcm_bytes(5.0, sample_rate=16000)
+        pcm_48k = _make_pcm_bytes(5.0, sample_rate=48000)
+
+        from app.search.orchestrator import SearchTimeoutError
+
+        with (
+            patch("app.routers.search.magic") as mock_magic,
+            patch("app.routers.search.decode_dual_rate", new_callable=AsyncMock) as mock_decode,
+            patch("app.routers.search.pcm_duration_seconds", return_value=5.0),
+            patch("app.routers.search.orchestrate_search", new_callable=AsyncMock) as mock_orch,
+        ):
+            mock_magic.from_buffer.return_value = "audio/mpeg"
+            mock_decode.return_value = (pcm_16k, pcm_48k)
+            mock_orch.side_effect = SearchTimeoutError("Exact search lane timed out")
+
+            resp = await search_client.post(
+                "/api/v1/search",
+                files={"audio": ("test.mp3", _FAKE_MP3_HEADER, "audio/mpeg")},
+                data={"mode": "exact"},
+            )
+
+        assert resp.status_code == 504
+        data = resp.json()
+        assert data["error"]["code"] == "SEARCH_TIMEOUT"
+
+    async def test_vibe_lane_error_returns_503(self, search_client: AsyncClient):
+        """mode=vibe, vibe lane throws -> 503 SERVICE_UNAVAILABLE."""
+        pcm_16k = _make_pcm_bytes(5.0, sample_rate=16000)
+        pcm_48k = _make_pcm_bytes(5.0, sample_rate=48000)
+
+        from app.search.orchestrator import SearchUnavailableError
+
+        with (
+            patch("app.routers.search.magic") as mock_magic,
+            patch("app.routers.search.decode_dual_rate", new_callable=AsyncMock) as mock_decode,
+            patch("app.routers.search.pcm_duration_seconds", return_value=5.0),
+            patch("app.routers.search.orchestrate_search", new_callable=AsyncMock) as mock_orch,
+        ):
+            mock_magic.from_buffer.return_value = "audio/mpeg"
+            mock_decode.return_value = (pcm_16k, pcm_48k)
+            mock_orch.side_effect = SearchUnavailableError("Vibe search lane failed")
+
+            resp = await search_client.post(
+                "/api/v1/search",
+                files={"audio": ("test.mp3", _FAKE_MP3_HEADER, "audio/mpeg")},
+                data={"mode": "vibe"},
+            )
+
+        assert resp.status_code == 503
+        data = resp.json()
+        assert data["error"]["code"] == "SERVICE_UNAVAILABLE"
+
+
+# ---------------------------------------------------------------------------
+# Test: MIME type detection (video/webm, FLAC)
+# ---------------------------------------------------------------------------
+
+
+class TestMimeTypeDetection:
+    """Tests for MIME type handling of video/webm and FLAC."""
+
+    async def test_video_webm_accepted(self, search_client: AsyncClient):
+        """python-magic returning video/webm for WebM should be accepted."""
+        mock_exact = [_make_exact_match()]
+        mock_vibe = [_make_vibe_match()]
+        pcm_16k = _make_pcm_bytes(5.0, sample_rate=16000)
+        pcm_48k = _make_pcm_bytes(5.0, sample_rate=48000)
+
+        with (
+            patch("app.routers.search.magic") as mock_magic,
+            patch("app.routers.search.decode_dual_rate", new_callable=AsyncMock) as mock_decode,
+            patch("app.routers.search.pcm_duration_seconds", return_value=5.0),
+            patch("app.routers.search.orchestrate_search", new_callable=AsyncMock) as mock_orch,
+        ):
+            # Simulate real python-magic behavior: returns video/webm for WebM containers
+            mock_magic.from_buffer.return_value = "video/webm"
+            mock_decode.return_value = (pcm_16k, pcm_48k)
+
+            from app.schemas.search import SearchResponse
+
+            mock_orch.return_value = SearchResponse(
+                request_id=uuid.uuid4(),
+                query_duration_ms=120.0,
+                exact_matches=mock_exact,
+                vibe_matches=mock_vibe,
+                mode_used=SearchMode.BOTH,
+            )
+
+            resp = await search_client.post(
+                "/api/v1/search",
+                files={"audio": ("test.webm", _FAKE_WEBM_HEADER, "video/webm")},
+                data={"mode": "both"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["mode_used"] == "both"
+
+    async def test_audio_flac_accepted(self, search_client: AsyncClient):
+        """audio/flac MIME type should be accepted."""
+        mock_exact = [_make_exact_match()]
+        pcm_16k = _make_pcm_bytes(5.0, sample_rate=16000)
+        pcm_48k = _make_pcm_bytes(5.0, sample_rate=48000)
+
+        with (
+            patch("app.routers.search.magic") as mock_magic,
+            patch("app.routers.search.decode_dual_rate", new_callable=AsyncMock) as mock_decode,
+            patch("app.routers.search.pcm_duration_seconds", return_value=5.0),
+            patch("app.routers.search.orchestrate_search", new_callable=AsyncMock) as mock_orch,
+        ):
+            mock_magic.from_buffer.return_value = "audio/flac"
+            mock_decode.return_value = (pcm_16k, pcm_48k)
+
+            from app.schemas.search import SearchResponse
+
+            mock_orch.return_value = SearchResponse(
+                request_id=uuid.uuid4(),
+                query_duration_ms=80.0,
+                exact_matches=mock_exact,
+                vibe_matches=[],
+                mode_used=SearchMode.EXACT,
+            )
+
+            resp = await search_client.post(
+                "/api/v1/search",
+                files={"audio": ("test.flac", b"\x66\x4c\x61\x43" + b"\x00" * 100, "audio/flac")},
+                data={"mode": "exact"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["mode_used"] == "exact"
+
+    async def test_audio_x_flac_accepted(self, search_client: AsyncClient):
+        """audio/x-flac MIME type should also be accepted."""
+        pcm_16k = _make_pcm_bytes(5.0, sample_rate=16000)
+        pcm_48k = _make_pcm_bytes(5.0, sample_rate=48000)
+
+        with (
+            patch("app.routers.search.magic") as mock_magic,
+            patch("app.routers.search.decode_dual_rate", new_callable=AsyncMock) as mock_decode,
+            patch("app.routers.search.pcm_duration_seconds", return_value=5.0),
+            patch("app.routers.search.orchestrate_search", new_callable=AsyncMock) as mock_orch,
+        ):
+            mock_magic.from_buffer.return_value = "audio/x-flac"
+            mock_decode.return_value = (pcm_16k, pcm_48k)
+
+            from app.schemas.search import SearchResponse
+
+            mock_orch.return_value = SearchResponse(
+                request_id=uuid.uuid4(),
+                query_duration_ms=80.0,
+                exact_matches=[],
+                vibe_matches=[],
+                mode_used=SearchMode.EXACT,
+            )
+
+            resp = await search_client.post(
+                "/api/v1/search",
+                files={"audio": ("test.flac", b"\x66\x4c\x61\x43" + b"\x00" * 100, "audio/x-flac")},
+                data={"mode": "exact"},
+            )
+
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Test: CLAP not loaded + vibe mode
+# ---------------------------------------------------------------------------
+
+
+class TestCLAPNotLoaded:
+    """Tests for graceful degradation when CLAP model is not available."""
+
+    @pytest.fixture
+    def search_app_no_clap(self):
+        """Create a FastAPI test app without CLAP model (simulates startup failure)."""
+        from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
+
+        from app.routers import health, search, version
+        from app.settings import settings
+
+        application = FastAPI(
+            title=settings.app_name,
+            version=settings.app_version,
+        )
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        application.include_router(health.router)
+        application.include_router(version.router, prefix="/api/v1")
+        application.include_router(search.router, prefix="/api/v1")
+
+        # CLAP model not loaded (None)
+        application.state.qdrant = MagicMock()
+        application.state.clap_model = None
+        application.state.clap_processor = None
+
+        return application
+
+    @pytest.fixture
+    async def client_no_clap(self, search_app_no_clap):
+        """Async HTTP client for testing with no CLAP model."""
+        transport = ASGITransport(app=search_app_no_clap)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+    async def test_vibe_mode_without_clap_returns_503(self, client_no_clap: AsyncClient):
+        """mode=vibe with CLAP not loaded -> 503 SERVICE_UNAVAILABLE."""
+        pcm_16k = _make_pcm_bytes(5.0, sample_rate=16000)
+        pcm_48k = _make_pcm_bytes(5.0, sample_rate=48000)
+
+        with (
+            patch("app.routers.search.magic") as mock_magic,
+            patch("app.routers.search.decode_dual_rate", new_callable=AsyncMock) as mock_decode,
+            patch("app.routers.search.pcm_duration_seconds", return_value=5.0),
+        ):
+            mock_magic.from_buffer.return_value = "audio/mpeg"
+            mock_decode.return_value = (pcm_16k, pcm_48k)
+
+            resp = await client_no_clap.post(
+                "/api/v1/search",
+                files={"audio": ("test.mp3", _FAKE_MP3_HEADER, "audio/mpeg")},
+                data={"mode": "vibe"},
+            )
+
+        assert resp.status_code == 503
+        data = resp.json()
+        assert data["error"]["code"] == "SERVICE_UNAVAILABLE"
+        assert "Embedding model" in data["error"]["message"]
+
+    async def test_both_mode_without_clap_downgrades_to_exact(self, client_no_clap: AsyncClient):
+        """mode=both with CLAP not loaded -> silently downgrade to mode=exact."""
+        mock_exact = [_make_exact_match()]
+        pcm_16k = _make_pcm_bytes(5.0, sample_rate=16000)
+        pcm_48k = _make_pcm_bytes(5.0, sample_rate=48000)
+
+        with (
+            patch("app.routers.search.magic") as mock_magic,
+            patch("app.routers.search.decode_dual_rate", new_callable=AsyncMock) as mock_decode,
+            patch("app.routers.search.pcm_duration_seconds", return_value=5.0),
+            patch("app.routers.search.orchestrate_search", new_callable=AsyncMock) as mock_orch,
+        ):
+            mock_magic.from_buffer.return_value = "audio/mpeg"
+            mock_decode.return_value = (pcm_16k, pcm_48k)
+
+            from app.schemas.search import SearchResponse
+
+            mock_orch.return_value = SearchResponse(
+                request_id=uuid.uuid4(),
+                query_duration_ms=80.0,
+                exact_matches=mock_exact,
+                vibe_matches=[],
+                mode_used=SearchMode.EXACT,
+            )
+
+            resp = await client_no_clap.post(
+                "/api/v1/search",
+                files={"audio": ("test.mp3", _FAKE_MP3_HEADER, "audio/mpeg")},
+                data={"mode": "both"},
+            )
+
+        assert resp.status_code == 200
+        # Orchestrator was called with mode=exact (downgraded from both)
+        mock_orch.assert_awaited_once()
+        call_kwargs = mock_orch.call_args
+        assert call_kwargs.kwargs["mode"] == SearchMode.EXACT
