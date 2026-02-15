@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt typecheck gen-client gen-client-from-file docker-up docker-down db-up db-down db-reset help
+.PHONY: install dev test lint fmt typecheck gen-client gen-client-from-file docker-up docker-down db-up db-down db-reset ingest rebuild-index help
 
 SERVICE_DIR := audio-ident-service
 UI_DIR := audio-ident-ui
@@ -76,6 +76,21 @@ db-reset: ## Drop + recreate database, reset Qdrant collection, run migrations
 	docker compose exec -T postgres dropdb -U audio_ident --if-exists audio_ident
 	docker compose exec -T postgres createdb -U audio_ident audio_ident
 	cd $(SERVICE_DIR) && uv run alembic upgrade head
+
+ingest: ## Ingest audio files (usage: make ingest AUDIO_DIR=/path/to/mp3s)
+	@test -n "$(AUDIO_DIR)" || (echo "Error: AUDIO_DIR required. Usage: make ingest AUDIO_DIR=/path/to/mp3s" && exit 1)
+	cd $(SERVICE_DIR) && uv run python -m app.ingest "$(AUDIO_DIR)"
+
+rebuild-index: ## Drop computed data and rebuild from raw audio
+	@echo "WARNING: This will drop Qdrant collection and Olaf LMDB."
+	@echo "Press Ctrl+C to cancel, or wait 5 seconds..."
+	@sleep 5
+	@echo "Clearing Olaf LMDB index..."
+	rm -rf $(SERVICE_DIR)/data/olaf_db/*
+	@echo "Dropping Qdrant collection..."
+	curl -sf -X DELETE "http://localhost:$${QDRANT_HTTP_PORT:-6333}/collections/$${QDRANT_COLLECTION_NAME:-audio_embeddings}" || true
+	@echo "Re-ingesting from raw audio..."
+	cd $(SERVICE_DIR) && uv run python -m app.ingest "$${AUDIO_STORAGE_ROOT:-./data}/raw"
 
 # Backward compatibility aliases
 db-up: docker-up ## (alias) Start Docker services
