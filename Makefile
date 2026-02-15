@@ -1,9 +1,11 @@
-.PHONY: install dev test lint fmt typecheck gen-client gen-client-from-file db-up db-down db-reset help
+.PHONY: install dev test lint fmt typecheck gen-client gen-client-from-file docker-up docker-down db-up db-down db-reset help
 
 SERVICE_DIR := audio-ident-service
 UI_DIR := audio-ident-ui
 SERVICE_PORT ?= 17010
 UI_PORT ?= 17000
+POSTGRES_MODE ?= docker
+QDRANT_MODE ?= docker
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -12,12 +14,10 @@ install: ## Install all dependencies
 	cd $(SERVICE_DIR) && uv sync --all-extras
 	cd $(UI_DIR) && pnpm install
 
-dev: ## Start postgres, service, and UI (all three)
+dev: ## Start postgres, qdrant, service, and UI
 	@trap 'echo "Shutting down..."; kill 0; exit 0' INT TERM; \
-	$(MAKE) db-up; \
-	echo "Waiting for postgres..."; \
-	until docker compose exec -T postgres pg_isready -U audio_ident > /dev/null 2>&1; do sleep 0.5; done; \
-	echo "Postgres ready."; \
+	$(MAKE) docker-up; \
+	echo "Running alembic migrations..."; \
 	cd $(SERVICE_DIR) && uv run alembic upgrade head; \
 	cd $(SERVICE_DIR) && uv run uvicorn app.main:app --host 0.0.0.0 --port $(SERVICE_PORT) --reload & \
 	cd $(UI_DIR) && pnpm dev --port $(UI_PORT) & \
@@ -46,13 +46,37 @@ gen-client-from-file: ## Generate TS client from spec file (usage: make gen-clie
 	@test -n "$(SPEC)" || (echo "Error: SPEC parameter required. Usage: make gen-client-from-file SPEC=path/to/openapi.json" && exit 1)
 	cd $(UI_DIR) && npx openapi-typescript $(abspath $(SPEC)) -o src/lib/api/generated.ts
 
-db-up: ## Start postgres via docker-compose
-	docker compose up -d postgres
+docker-up: ## Start Docker services (postgres + qdrant) based on mode variables
+	@if [ "$(POSTGRES_MODE)" = "docker" ]; then \
+		echo "Starting Postgres (docker)..."; \
+		docker compose --profile postgres up -d; \
+		echo "Waiting for Postgres to be ready..."; \
+		until docker compose exec -T postgres pg_isready -U audio_ident > /dev/null 2>&1; do sleep 0.5; done; \
+		echo "Postgres ready."; \
+	else \
+		echo "Postgres mode=$(POSTGRES_MODE), skipping Docker."; \
+	fi
+	@if [ "$(QDRANT_MODE)" = "docker" ]; then \
+		echo "Starting Qdrant (docker)..."; \
+		docker compose --profile qdrant up -d; \
+		echo "Waiting for Qdrant to be ready..."; \
+		until docker compose exec -T qdrant bash -c 'exec 3<>/dev/tcp/localhost/6333 && echo -e "GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && cat <&3 | grep -q "200 OK"' > /dev/null 2>&1; do sleep 0.5; done; \
+		echo "Qdrant ready."; \
+	else \
+		echo "Qdrant mode=$(QDRANT_MODE), skipping Docker."; \
+	fi
 
-db-down: ## Stop postgres
-	docker compose down
+docker-down: ## Stop all Docker services
+	docker compose --profile postgres --profile qdrant down
 
-db-reset: ## Drop + recreate database + run migrations
+db-reset: ## Drop + recreate database, reset Qdrant collection, run migrations
+	$(MAKE) docker-down
+	docker volume rm -f $$(docker volume ls -q --filter name=audio-ident_qdrant_data) 2>/dev/null || true
+	$(MAKE) docker-up
 	docker compose exec -T postgres dropdb -U audio_ident --if-exists audio_ident
 	docker compose exec -T postgres createdb -U audio_ident audio_ident
 	cd $(SERVICE_DIR) && uv run alembic upgrade head
+
+# Backward compatibility aliases
+db-up: docker-up ## (alias) Start Docker services
+db-down: docker-down ## (alias) Stop Docker services

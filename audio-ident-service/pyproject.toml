@@ -14,6 +14,7 @@ dependencies = [
     "PyJWT>=2,<3",
     "argon2-cffi>=23,<25",
     "python-multipart>=0.0.18,<1",
+    "qdrant-client>=1.12,<2.0",
 ]
 
 [project.optional-dependencies]
@@ -62,6 +63,7 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 plugins = ["pydantic.mypy"]
+exclude = ["alembic/versions/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

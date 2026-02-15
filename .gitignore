@@ -58,3 +58,4 @@ kuzu-memories/
 # Ruff / mypy
 .ruff_cache/
 .mypy_cache/
+prototypes/

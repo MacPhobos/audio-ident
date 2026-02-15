@@ -41,7 +41,7 @@ repos:
       - id: mypy
         additional_dependencies: [types-PyYAML, types-requests]
         args: ['--config-file=mypy.ini']
-        exclude: ^(venv/|\.venv/|env/|\.env/|build/|dist/|\.git/|tests/.*\.py|scripts/.*\.py)
+        exclude: ^(venv/|\.venv/|env/|\.env/|build/|dist/|\.git/|tests/.*\.py|scripts/.*\.py|.*alembic/versions/.*\.py)
 
   # Security scanning with bandit
   - repo: https://github.com/pycqa/bandit

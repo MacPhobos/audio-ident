@@ -27,6 +27,21 @@ class Settings(BaseSettings):
     app_name: str = "audio-ident-service"
     app_version: str = "0.1.0"
 
+    # Qdrant
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str | None = None
+    qdrant_collection_name: str = "audio_embeddings"
+
+    # Audio storage
+    audio_storage_root: str = "./data"
+
+    # Olaf
+    olaf_lmdb_path: str = "./data/olaf_db"
+
+    # Embedding
+    embedding_model: str = "clap-htsat-large"
+    embedding_dim: int = 512
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

@@ -1,9 +1,60 @@
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from qdrant_client import AsyncQdrantClient
+from sqlalchemy import text
 
+from app.db.engine import engine
 from app.routers import health, version
 from app.settings import settings
+
+logger = logging.getLogger(__name__)
+
+
+async def _check_postgres() -> None:
+    """Verify PostgreSQL is reachable."""
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+
+
+async def _check_qdrant(client: AsyncQdrantClient) -> None:
+    """Verify Qdrant is reachable."""
+    await client.get_collections()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # 1. Check Postgres
+    try:
+        await _check_postgres()
+        logger.info("PostgreSQL connection verified")
+    except Exception as exc:
+        raise SystemExit(f"FATAL: Cannot reach PostgreSQL. Error: {exc}") from exc
+
+    # 2. Check Qdrant
+    qdrant = AsyncQdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key if settings.qdrant_api_key else None,
+    )
+    try:
+        await _check_qdrant(qdrant)
+        logger.info("Qdrant connection verified at %s", settings.qdrant_url)
+    except Exception as exc:
+        raise SystemExit(
+            f"FATAL: Cannot reach Qdrant at {settings.qdrant_url}. Error: {exc}"
+        ) from exc
+
+    app.state.qdrant = qdrant
+
+    yield
+
+    # Shutdown
+    await qdrant.close()
+    await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -12,6 +63,7 @@ def create_app() -> FastAPI:
         version=settings.app_version,
         docs_url="/docs",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
 
     application.add_middleware(
