@@ -5,8 +5,8 @@ Phase 2 (Chromaprint): Content-level near-duplicate via acoustic fingerprint
 similarity within a duration tolerance window.
 """
 
+import asyncio
 import logging
-import subprocess  # nosec B404 - subprocess used for trusted fpcalc binary
 import uuid
 
 import numpy as np
@@ -47,13 +47,14 @@ def f32le_to_s16le(pcm_f32le: bytes) -> bytes:
         Raw 16-bit signed integer little-endian PCM data.
     """
     samples = np.frombuffer(pcm_f32le, dtype=np.float32)
-    return (samples * 32767).astype(np.int16).tobytes()
+    return np.clip(samples * 32767, -32768, 32767).astype(np.int16).tobytes()
 
 
-def generate_chromaprint(pcm_16k_s16le: bytes, duration: float) -> str | None:
+async def generate_chromaprint(pcm_16k_s16le: bytes, duration: float) -> str | None:
     """Generate a Chromaprint fingerprint from 16kHz s16le PCM.
 
-    Uses the ``fpcalc`` CLI binary from Chromaprint/pyacoustid.
+    Uses the ``fpcalc`` CLI binary from Chromaprint/pyacoustid via
+    ``asyncio.create_subprocess_exec`` to avoid blocking the event loop.
 
     Note:
         Takes s16le format. The caller should convert f32le to s16le via
@@ -70,33 +71,42 @@ def generate_chromaprint(pcm_16k_s16le: bytes, duration: float) -> str | None:
         return None
 
     try:
-        proc = subprocess.run(  # nosec B603 B607 - fpcalc is a trusted Chromaprint binary
-            [
-                "fpcalc",
-                "-raw",
-                "-rate",
-                "16000",
-                "-channels",
-                "1",
-                "-length",
-                str(int(duration)),
-                "-signed",
-                "-",
-            ],
-            input=pcm_16k_s16le,
-            capture_output=True,
-            timeout=30,
+        proc = await asyncio.create_subprocess_exec(
+            "fpcalc",
+            "-raw",
+            "-rate",
+            "16000",
+            "-channels",
+            "1",
+            "-length",
+            str(int(duration)),
+            "-signed",
+            "-",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(input=pcm_16k_s16le),
+                timeout=30,
+            )
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning("fpcalc timed out after 30 seconds")
+            return None
 
         if proc.returncode != 0:
             logger.warning(
                 "fpcalc exited with code %d: %s",
                 proc.returncode,
-                proc.stderr.decode(errors="replace").strip(),
+                stderr_bytes.decode(errors="replace").strip(),
             )
             return None
 
-        stdout = proc.stdout.decode(errors="replace")
+        stdout = stdout_bytes.decode(errors="replace")
         for line in stdout.strip().splitlines():
             if line.startswith("FINGERPRINT="):
                 return line.split("=", 1)[1]
@@ -106,9 +116,6 @@ def generate_chromaprint(pcm_16k_s16le: bytes, duration: float) -> str | None:
 
     except FileNotFoundError:
         logger.warning("fpcalc binary not found; Chromaprint fingerprinting unavailable")
-        return None
-    except subprocess.TimeoutExpired:
-        logger.warning("fpcalc timed out after 30 seconds")
         return None
     except Exception:
         logger.exception("Unexpected error in generate_chromaprint")

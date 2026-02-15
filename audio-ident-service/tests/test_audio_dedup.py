@@ -1,5 +1,6 @@
 """Tests for app.audio.dedup module."""
 
+import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -64,37 +65,72 @@ class TestF32leToS16le:
 
 
 class TestGenerateChromaprint:
-    def test_returns_none_on_empty_input(self) -> None:
-        result = generate_chromaprint(b"", 1.0)
+    @pytest.mark.asyncio
+    async def test_returns_none_on_empty_input(self) -> None:
+        result = await generate_chromaprint(b"", 1.0)
         assert result is None
 
-    @patch("app.audio.dedup.subprocess.run")
-    def test_returns_fingerprint_on_success(self, mock_run: MagicMock) -> None:
+    @pytest.mark.asyncio
+    async def test_returns_fingerprint_on_success(self) -> None:
         """When fpcalc succeeds, returns the fingerprint string."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=b"DURATION=5\nFINGERPRINT=123456789,987654321,111222333\n",
-            stderr=b"",
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (
+            b"DURATION=5\nFINGERPRINT=123456789,987654321,111222333\n",
+            b"",
         )
+        mock_proc.returncode = 0
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
 
-        result = generate_chromaprint(b"\x00" * 32000, 1.0)
+        with patch(
+            "app.audio.dedup.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            result = await generate_chromaprint(b"\x00" * 32000, 1.0)
         assert result == "123456789,987654321,111222333"
 
-    @patch("app.audio.dedup.subprocess.run")
-    def test_returns_none_on_failure(self, mock_run: MagicMock) -> None:
+    @pytest.mark.asyncio
+    async def test_returns_none_on_failure(self) -> None:
         """When fpcalc fails, returns None."""
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout=b"",
-            stderr=b"error occurred",
-        )
+        mock_proc = AsyncMock()
+        mock_proc.communicate.return_value = (b"", b"error occurred")
+        mock_proc.returncode = 1
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
 
-        result = generate_chromaprint(b"\x00" * 32000, 1.0)
+        with patch(
+            "app.audio.dedup.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            result = await generate_chromaprint(b"\x00" * 32000, 1.0)
         assert result is None
 
-    @patch("app.audio.dedup.subprocess.run", side_effect=FileNotFoundError)
-    def test_returns_none_when_fpcalc_missing(self, mock_run: MagicMock) -> None:
-        result = generate_chromaprint(b"\x00" * 32000, 1.0)
+    @pytest.mark.asyncio
+    async def test_returns_none_when_fpcalc_missing(self) -> None:
+        with patch(
+            "app.audio.dedup.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            side_effect=FileNotFoundError,
+        ):
+            result = await generate_chromaprint(b"\x00" * 32000, 1.0)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_timeout(self) -> None:
+        """When fpcalc times out, returns None."""
+        mock_proc = AsyncMock()
+        mock_proc.communicate.side_effect = asyncio.TimeoutError
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        with patch(
+            "app.audio.dedup.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            result = await generate_chromaprint(b"\x00" * 32000, 1.0)
         assert result is None
 
 

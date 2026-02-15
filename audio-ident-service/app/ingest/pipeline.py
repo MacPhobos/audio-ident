@@ -5,7 +5,7 @@ duplicate detection, Olaf fingerprint indexing, and CLAP embedding generation.
 """
 
 import asyncio
-import contextlib
+import functools
 import logging
 import shutil
 import uuid
@@ -22,15 +22,15 @@ from app.audio.dedup import (
     f32le_to_s16le,
     generate_chromaprint,
 )
-from app.audio.embedding import EmbeddingError, generate_chunked_embeddings
-from app.audio.fingerprint import olaf_delete_track, olaf_index_track
+from app.audio.embedding import generate_chunked_embeddings
+from app.audio.fingerprint import olaf_index_track
 from app.audio.metadata import compute_file_hash, extract_metadata
 from app.audio.qdrant_setup import (
-    delete_track_embeddings,
     ensure_collection,
     upsert_track_embeddings,
 )
 from app.audio.storage import ensure_storage_dirs, raw_audio_path
+from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -75,15 +75,12 @@ async def ingest_file(
     """Ingest a single audio file through the full pipeline.
 
     Steps:
-    1. Read file bytes, compute SHA-256 hash
-    2. Check file hash duplicate (fast path)
-    3. Save raw file to data/raw/{hash_prefix}/{hash}.{ext}
-    4. Extract metadata via mutagen
-    5. Decode to dual-rate PCM (16kHz + 48kHz in parallel)
-    6. Run 3 parallel tasks via asyncio.gather:
-       a. Chromaprint fingerprint generation + content dedup check
-       b. Olaf fingerprint indexing
-       c. CLAP chunked embedding generation + Qdrant upsert
+    1. Compute SHA-256 hash, check file duplicate (fast path)
+    2. Extract metadata
+    3. Decode to dual-rate PCM (16kHz + 48kHz) + validate duration
+    4. Save raw file (only after validation passes)
+    5. Chromaprint fingerprint + content dedup check (fast, before indexing)
+    6. If not duplicate: Olaf + CLAP in parallel via asyncio.gather
     7. Insert Track record into PostgreSQL
 
     Args:
@@ -97,12 +94,12 @@ async def ingest_file(
         IngestResult with status and details.
     """
     result = IngestResult(file_path=str(file_path))
+    storage_path: Path | None = None
 
     try:
-        # Step 1: Compute file hash
+        # Step 1: Compute file hash + check file duplicate
         file_hash = compute_file_hash(file_path)
 
-        # Step 2: Check file hash duplicate
         async with session_factory() as session:
             existing_id = await check_file_duplicate(session, file_hash)
             if existing_id:
@@ -115,23 +112,16 @@ async def ingest_file(
                 )
                 return result
 
-        # Step 3: Save raw file
-        extension = file_path.suffix.lstrip(".")
-        storage_path = raw_audio_path(file_hash, extension)
-        ensure_storage_dirs(file_hash)
-        shutil.copy2(file_path, storage_path)
-
-        # Step 4: Extract metadata
+        # Step 2: Extract metadata
         metadata = extract_metadata(file_path)
 
-        # Step 5: Decode to dual-rate PCM
+        # Step 3: Decode to dual-rate PCM + validate duration
         file_bytes = file_path.read_bytes()
         pcm_16k, pcm_48k = await decode_dual_rate(file_bytes)
 
         duration = pcm_duration_seconds(pcm_16k, 16000)
         result.duration_seconds = duration
 
-        # Duration validation
         if duration < MIN_INGESTION_DURATION:
             result.status = "skipped"
             result.error = f"Too short: {duration:.1f}s (min: {MIN_INGESTION_DURATION}s)"
@@ -143,21 +133,28 @@ async def ingest_file(
             logger.warning("Skipping too-long file: %s (%.1fs)", file_path.name, duration)
             return result
 
-        # Step 6: Parallel processing
+        # Step 4: Save raw file (after duration validation passes)
+        extension = file_path.suffix.lstrip(".")
+        storage_path = raw_audio_path(file_hash, extension)
+        ensure_storage_dirs(file_hash)
+        shutil.copy2(file_path, storage_path)
+
+        # Step 5: Chromaprint dedup check (fast, before expensive indexing)
         track_id = uuid.uuid4()
 
-        # 6a: Chromaprint + dedup
-        async def chromaprint_task() -> tuple[str, uuid.UUID | None, str | None]:
-            pcm_s16le = f32le_to_s16le(pcm_16k)
-            fingerprint = generate_chromaprint(pcm_s16le, duration)
-            if fingerprint:
-                async with session_factory() as session:
-                    content_dup = await check_content_duplicate(session, fingerprint, duration)
-                    if content_dup:
-                        return ("duplicate", content_dup, fingerprint)
-            return ("ok", None, fingerprint)
+        pcm_s16le = f32le_to_s16le(pcm_16k)
+        fingerprint = await generate_chromaprint(pcm_s16le, duration)
+        if fingerprint:
+            async with session_factory() as session:
+                content_dup = await check_content_duplicate(session, fingerprint, duration)
+                if content_dup:
+                    result.status = "duplicate"
+                    result.track_id = content_dup
+                    # Clean up saved raw file for duplicate
+                    Path(storage_path).unlink(missing_ok=True)
+                    return result
 
-        # 6b: Olaf indexing
+        # Step 6: Parallel indexing (only if not duplicate)
         async def olaf_task() -> bool:
             try:
                 success = await olaf_index_track(pcm_16k, track_id)
@@ -166,42 +163,34 @@ async def ingest_file(
                 logger.error("Olaf indexing failed for %s: %s", file_path.name, e)
                 return False
 
-        # 6c: CLAP embedding + Qdrant
         async def embedding_task() -> tuple[int, int]:
             try:
-                chunks = generate_chunked_embeddings(pcm_48k, clap_model, clap_processor)
+                loop = asyncio.get_event_loop()
+                chunks = await loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        generate_chunked_embeddings, pcm_48k, clap_model, clap_processor
+                    ),
+                )
                 if chunks:
                     meta = {
                         "artist": metadata.artist or "",
                         "title": metadata.title or "",
                         "genre": "",
                     }
-                    count = upsert_track_embeddings(qdrant_client, track_id, chunks, meta)
+                    count = await loop.run_in_executor(
+                        None,
+                        functools.partial(
+                            upsert_track_embeddings, qdrant_client, track_id, chunks, meta
+                        ),
+                    )
                     return len(chunks), count
                 return 0, 0
-            except (EmbeddingError, Exception) as e:
+            except Exception as e:
                 logger.error("Embedding failed for %s: %s", file_path.name, e)
                 return 0, 0
 
-        # Run all 3 in parallel
-        chromaprint_result, olaf_success, embedding_result = await asyncio.gather(
-            chromaprint_task(), olaf_task(), embedding_task()
-        )
-
-        # Check content duplicate from chromaprint
-        chroma_status, content_dup_id, fingerprint = chromaprint_result
-        if chroma_status == "duplicate" and content_dup_id:
-            result.status = "duplicate"
-            result.track_id = content_dup_id
-            # Clean up: remove from Olaf and Qdrant since this is a dup
-            # (Best effort - don't fail if cleanup fails)
-            if olaf_success:
-                with contextlib.suppress(Exception):
-                    await olaf_delete_track(track_id)
-            if embedding_result[0] > 0:
-                with contextlib.suppress(Exception):
-                    delete_track_embeddings(qdrant_client, track_id)
-            return result
+        olaf_success, embedding_result = await asyncio.gather(olaf_task(), embedding_task())
 
         embedding_count, _ = embedding_result
 
@@ -225,8 +214,8 @@ async def ingest_file(
                 chromaprint_fingerprint=fingerprint,
                 chromaprint_duration=duration if fingerprint else None,
                 olaf_indexed=olaf_success,
-                embedding_model=("clap-htsat-large" if embedding_count > 0 else None),
-                embedding_dim=512 if embedding_count > 0 else None,
+                embedding_model=(settings.embedding_model if embedding_count > 0 else None),
+                embedding_dim=settings.embedding_dim if embedding_count > 0 else None,
             )
             session.add(track)
             await session.commit()
@@ -246,11 +235,15 @@ async def ingest_file(
         result.status = "error"
         result.error = f"Decode error: {e}"
         logger.error("Decode error for %s: %s", file_path.name, e)
+        if storage_path:
+            Path(storage_path).unlink(missing_ok=True)
         return result
     except Exception as e:
         result.status = "error"
         result.error = f"Unexpected error: {e}"
         logger.exception("Unexpected error ingesting %s", file_path.name)
+        if storage_path:
+            Path(storage_path).unlink(missing_ok=True)
         return result
 
 
@@ -313,7 +306,7 @@ async def ingest_directory(
             report.errors += 1
 
     logger.info(
-        "Ingestion complete: %d ingested, %d duplicates, %d skipped, %d errors " "(of %d total)",
+        "Ingestion complete: %d ingested, %d duplicates, %d skipped, %d errors (of %d total)",
         report.ingested,
         report.duplicates,
         report.skipped,

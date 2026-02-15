@@ -21,6 +21,11 @@ from app.ingest.pipeline import (
     ingest_file,
 )
 
+# Mock settings before tests run
+_MOCK_SETTINGS = MagicMock()
+_MOCK_SETTINGS.embedding_model = "clap-htsat-large"
+_MOCK_SETTINGS.embedding_dim = 512
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -138,9 +143,6 @@ async def test_successful_ingestion(
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
-        patch("app.ingest.pipeline.ensure_storage_dirs"),
-        patch("shutil.copy2"),
         patch(
             "app.ingest.pipeline.extract_metadata",
             return_value=MagicMock(
@@ -159,9 +161,13 @@ async def test_successful_ingestion(
             new_callable=AsyncMock,
             return_value=(pcm_16k, pcm_48k),
         ),
+        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
+        patch("app.ingest.pipeline.ensure_storage_dirs"),
+        patch("shutil.copy2"),
         patch("app.ingest.pipeline.f32le_to_s16le", return_value=b"\x00" * 100),
         patch(
             "app.ingest.pipeline.generate_chromaprint",
+            new_callable=AsyncMock,
             return_value="1234,5678,9012",
         ),
         patch(
@@ -182,6 +188,7 @@ async def test_successful_ingestion(
         ),
         patch("app.ingest.pipeline.upsert_track_embeddings", return_value=1),
         patch("app.ingest.pipeline.uuid.uuid4", return_value=track_uuid),
+        patch("app.ingest.pipeline.settings", _MOCK_SETTINGS),
     ):
         result = await ingest_file(
             temp_single_file,
@@ -245,7 +252,10 @@ async def test_content_duplicate_detected(
     mock_qdrant_client,
     mock_session,
 ):
-    """Chromaprint finds a content match -> status='duplicate'."""
+    """Chromaprint finds a content match -> status='duplicate'.
+
+    The dedup check now runs BEFORE Olaf/CLAP indexing, so no cleanup is needed.
+    """
     content_dup_uuid = uuid.uuid4()
     pcm_16k = pcm_for_duration(10.0, 16000)
     pcm_48k = pcm_for_duration(10.0, 48000)
@@ -267,9 +277,6 @@ async def test_content_duplicate_detected(
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
-        patch("app.ingest.pipeline.ensure_storage_dirs"),
-        patch("shutil.copy2"),
         patch(
             "app.ingest.pipeline.extract_metadata",
             return_value=MagicMock(
@@ -288,9 +295,13 @@ async def test_content_duplicate_detected(
             new_callable=AsyncMock,
             return_value=(pcm_16k, pcm_48k),
         ),
+        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
+        patch("app.ingest.pipeline.ensure_storage_dirs"),
+        patch("shutil.copy2"),
         patch("app.ingest.pipeline.f32le_to_s16le", return_value=b"\x00" * 100),
         patch(
             "app.ingest.pipeline.generate_chromaprint",
+            new_callable=AsyncMock,
             return_value="1234,5678",
         ),
         patch(
@@ -302,17 +313,7 @@ async def test_content_duplicate_detected(
             "app.ingest.pipeline.olaf_index_track",
             new_callable=AsyncMock,
             return_value=True,
-        ),
-        patch(
-            "app.ingest.pipeline.generate_chunked_embeddings",
-            return_value=[],
-        ),
-        patch("app.ingest.pipeline.upsert_track_embeddings", return_value=0),
-        patch(
-            "app.ingest.pipeline.olaf_delete_track",
-            new_callable=AsyncMock,
-            return_value=True,
-        ),
+        ) as mock_olaf,
     ):
         result = await ingest_file(
             temp_single_file,
@@ -324,6 +325,8 @@ async def test_content_duplicate_detected(
 
     assert result.status == "duplicate"
     assert result.track_id == content_dup_uuid
+    # Olaf should NOT be called since dedup runs before indexing
+    mock_olaf.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -334,7 +337,7 @@ async def test_decode_error_returns_error_status(
     mock_qdrant_client,
     mock_session,
 ):
-    """FFmpeg decode failure -> status='error'."""
+    """FFmpeg decode failure -> status='error'. Raw file should not be saved."""
     from app.audio.decode import AudioDecodeError
 
     mock_session_ctx = AsyncMock()
@@ -354,9 +357,6 @@ async def test_decode_error_returns_error_status(
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
-        patch("app.ingest.pipeline.ensure_storage_dirs"),
-        patch("shutil.copy2"),
         patch(
             "app.ingest.pipeline.extract_metadata",
             return_value=MagicMock(
@@ -397,7 +397,10 @@ async def test_too_short_file_skipped(
     mock_qdrant_client,
     mock_session,
 ):
-    """Audio shorter than MIN_INGESTION_DURATION -> status='skipped'."""
+    """Audio shorter than MIN_INGESTION_DURATION -> status='skipped'.
+
+    Raw file should NOT be saved since duration validation fails first.
+    """
     pcm_16k = pcm_for_duration(1.0, 16000)  # 1 second < 3 second min
     pcm_48k = pcm_for_duration(1.0, 48000)
 
@@ -418,9 +421,6 @@ async def test_too_short_file_skipped(
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
-        patch("app.ingest.pipeline.ensure_storage_dirs"),
-        patch("shutil.copy2"),
         patch(
             "app.ingest.pipeline.extract_metadata",
             return_value=MagicMock(
@@ -462,7 +462,10 @@ async def test_too_long_file_skipped(
     mock_qdrant_client,
     mock_session,
 ):
-    """Audio longer than MAX_INGESTION_DURATION -> status='skipped'."""
+    """Audio longer than MAX_INGESTION_DURATION -> status='skipped'.
+
+    Raw file should NOT be saved since duration validation fails first.
+    """
     pcm_16k = pcm_for_duration(2000.0, 16000)  # 2000s > 1800s max
     pcm_48k = pcm_for_duration(2000.0, 48000)
 
@@ -483,9 +486,6 @@ async def test_too_long_file_skipped(
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
-        patch("app.ingest.pipeline.ensure_storage_dirs"),
-        patch("shutil.copy2"),
         patch(
             "app.ingest.pipeline.extract_metadata",
             return_value=MagicMock(
@@ -548,9 +548,6 @@ async def test_olaf_failure_continues(
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
-        patch("app.ingest.pipeline.ensure_storage_dirs"),
-        patch("shutil.copy2"),
         patch(
             "app.ingest.pipeline.extract_metadata",
             return_value=MagicMock(
@@ -569,8 +566,15 @@ async def test_olaf_failure_continues(
             new_callable=AsyncMock,
             return_value=(pcm_16k, pcm_48k),
         ),
+        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
+        patch("app.ingest.pipeline.ensure_storage_dirs"),
+        patch("shutil.copy2"),
         patch("app.ingest.pipeline.f32le_to_s16le", return_value=b"\x00" * 100),
-        patch("app.ingest.pipeline.generate_chromaprint", return_value=None),
+        patch(
+            "app.ingest.pipeline.generate_chromaprint",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch(
             "app.ingest.pipeline.olaf_index_track",
             new_callable=AsyncMock,
@@ -584,6 +588,7 @@ async def test_olaf_failure_continues(
         ),
         patch("app.ingest.pipeline.upsert_track_embeddings", return_value=1),
         patch("app.ingest.pipeline.uuid.uuid4", return_value=track_uuid),
+        patch("app.ingest.pipeline.settings", _MOCK_SETTINGS),
     ):
         result = await ingest_file(
             temp_single_file,
@@ -628,9 +633,6 @@ async def test_embedding_failure_continues(
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
-        patch("app.ingest.pipeline.ensure_storage_dirs"),
-        patch("shutil.copy2"),
         patch(
             "app.ingest.pipeline.extract_metadata",
             return_value=MagicMock(
@@ -649,8 +651,15 @@ async def test_embedding_failure_continues(
             new_callable=AsyncMock,
             return_value=(pcm_16k, pcm_48k),
         ),
+        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
+        patch("app.ingest.pipeline.ensure_storage_dirs"),
+        patch("shutil.copy2"),
         patch("app.ingest.pipeline.f32le_to_s16le", return_value=b"\x00" * 100),
-        patch("app.ingest.pipeline.generate_chromaprint", return_value="1234,5678"),
+        patch(
+            "app.ingest.pipeline.generate_chromaprint",
+            new_callable=AsyncMock,
+            return_value="1234,5678",
+        ),
         patch(
             "app.ingest.pipeline.check_content_duplicate",
             new_callable=AsyncMock,
@@ -666,6 +675,7 @@ async def test_embedding_failure_continues(
             side_effect=EmbeddingError("CLAP crashed"),
         ),
         patch("app.ingest.pipeline.uuid.uuid4", return_value=track_uuid),
+        patch("app.ingest.pipeline.settings", _MOCK_SETTINGS),
     ):
         result = await ingest_file(
             temp_single_file,
@@ -741,9 +751,6 @@ async def test_no_metadata_title_uses_filename(
             new_callable=AsyncMock,
             return_value=None,
         ),
-        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
-        patch("app.ingest.pipeline.ensure_storage_dirs"),
-        patch("shutil.copy2"),
         patch(
             "app.ingest.pipeline.extract_metadata",
             return_value=MagicMock(
@@ -762,8 +769,15 @@ async def test_no_metadata_title_uses_filename(
             new_callable=AsyncMock,
             return_value=(pcm_16k, pcm_48k),
         ),
+        patch("app.ingest.pipeline.raw_audio_path", return_value=Path("/tmp/fake.mp3")),
+        patch("app.ingest.pipeline.ensure_storage_dirs"),
+        patch("shutil.copy2"),
         patch("app.ingest.pipeline.f32le_to_s16le", return_value=b"\x00" * 100),
-        patch("app.ingest.pipeline.generate_chromaprint", return_value=None),
+        patch(
+            "app.ingest.pipeline.generate_chromaprint",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch(
             "app.ingest.pipeline.olaf_index_track",
             new_callable=AsyncMock,
@@ -771,6 +785,7 @@ async def test_no_metadata_title_uses_filename(
         ),
         patch("app.ingest.pipeline.generate_chunked_embeddings", return_value=[]),
         patch("app.ingest.pipeline.upsert_track_embeddings", return_value=0),
+        patch("app.ingest.pipeline.settings", _MOCK_SETTINGS),
     ):
         result = await ingest_file(
             temp_single_file,
