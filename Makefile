@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt typecheck gen-client gen-client-from-file docker-up docker-down db-up db-down db-reset ingest rebuild-index help
+.PHONY: install dev test lint fmt typecheck gen-client gen-client-from-file docker-up docker-down db-up db-down db-reset ingest rebuild-index eval-corpus eval-exact eval-vibe eval-latency eval-report eval-all help
 
 SERVICE_DIR := audio-ident-service
 UI_DIR := audio-ident-ui
@@ -91,6 +91,24 @@ rebuild-index: ## Drop computed data and rebuild from raw audio
 	curl -sf -X DELETE "http://localhost:$${QDRANT_HTTP_PORT:-6333}/collections/$${QDRANT_COLLECTION_NAME:-audio_embeddings}" || true
 	@echo "Re-ingesting from raw audio..."
 	cd $(SERVICE_DIR) && uv run python -m app.ingest "$${AUDIO_STORAGE_ROOT:-./data}/raw"
+
+eval-corpus: ## Build evaluation test corpus (usage: make eval-corpus AUDIO_DIR=/path/to/mp3s)
+	@test -n "$(AUDIO_DIR)" || (echo "Error: AUDIO_DIR required. Usage: make eval-corpus AUDIO_DIR=/path/to/mp3s" && exit 1)
+	cd $(SERVICE_DIR) && uv run python scripts/build_eval_corpus.py --audio-dir "$(AUDIO_DIR)"
+
+eval-exact: ## Run exact ID (fingerprint) evaluation
+	cd $(SERVICE_DIR) && uv run python scripts/eval_exact.py
+
+eval-vibe: ## Run vibe search evaluation (generates rating sheet for human scoring)
+	cd $(SERVICE_DIR) && uv run python scripts/eval_vibe.py
+
+eval-latency: ## Run end-to-end latency benchmark via HTTP
+	cd $(SERVICE_DIR) && uv run python scripts/eval_latency.py
+
+eval-report: ## Generate go/no-go evaluation report from results
+	cd $(SERVICE_DIR) && uv run python scripts/eval_report.py
+
+eval-all: eval-exact eval-vibe eval-latency eval-report ## Run full evaluation pipeline (run eval-corpus first)
 
 # Backward compatibility aliases
 db-up: docker-up ## (alias) Start Docker services

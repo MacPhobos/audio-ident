@@ -58,3 +58,6 @@ kuzu-memories/
 # Ruff / mypy
 .ruff_cache/
 .mypy_cache/
+
+# Evaluation corpus (generated, contains audio clips)
+eval_corpus/
