@@ -24,12 +24,17 @@ export interface ApiError {
 export class ApiRequestError extends Error {
 	public readonly code: string;
 	public readonly status: number;
+	public readonly body?: { error?: { code?: string; message?: string; details?: unknown } };
 
-	constructor(error: ApiError) {
+	constructor(
+		error: ApiError,
+		body?: { error?: { code?: string; message?: string; details?: unknown } }
+	) {
 		super(error.message);
 		this.name = 'ApiRequestError';
 		this.code = error.code;
 		this.status = error.status;
+		this.body = body;
 	}
 }
 
@@ -40,7 +45,33 @@ export class ApiRequestError extends Error {
 async function fetchJSON<T>(path: string): Promise<T> {
 	const res = await fetch(`${BASE_URL}${path}`);
 	if (!res.ok) {
-		throw new Error(`API error: ${res.status} ${res.statusText}`);
+		let apiError: ApiError = {
+			code: 'UNKNOWN',
+			message: `API error: ${res.status} ${res.statusText}`,
+			status: res.status
+		};
+		let rawBody: { error?: { code?: string; message?: string; details?: unknown } } | undefined;
+
+		try {
+			const body = await res.json();
+			rawBody = body;
+			if (body?.error) {
+				apiError = {
+					code: body.error.code ?? 'UNKNOWN',
+					message: body.error.message ?? apiError.message,
+					status: res.status
+				};
+			} else if (body?.detail) {
+				const msg = Array.isArray(body.detail)
+					? body.detail.map((d: Record<string, unknown>) => d.msg).join('; ')
+					: String(body.detail);
+				apiError = { code: 'VALIDATION_ERROR', message: msg, status: res.status };
+			}
+		} catch {
+			// Use the default error built above
+		}
+
+		throw new ApiRequestError(apiError, rawBody);
 	}
 	return res.json() as Promise<T>;
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import { onDestroy } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		fetchTracks,
@@ -52,6 +53,10 @@
 			goto(url.toString(), { replaceState: true, keepFocus: true });
 		}, 300);
 	}
+
+	onDestroy(() => {
+		if (debounceTimer) clearTimeout(debounceTimer);
+	});
 
 	// ---------------------------------------------------------------------------
 	// Query
@@ -200,16 +205,21 @@
 
 	<!-- Results -->
 	{:else}
+		<div aria-live="polite" aria-atomic="true">
+			<p class="sr-only">
+				Showing {rangeStart} to {rangeEnd} of {totalItems} tracks{currentSearch ? ` matching "${currentSearch}"` : ''}
+			</p>
+		</div>
 		<!-- Desktop Table (>= 640px) -->
 		<div class="hidden sm:block">
 			<div class="overflow-hidden rounded-xl border bg-white">
 				<table class="w-full text-sm">
 					<thead>
 						<tr class="border-b bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-							<th class="px-4 py-3">Title</th>
-							<th class="px-4 py-3">Artist</th>
-							<th class="px-4 py-3">Album</th>
-							<th class="px-4 py-3 text-right">Duration</th>
+							<th scope="col" class="px-4 py-3">Title</th>
+							<th scope="col" class="px-4 py-3">Artist</th>
+							<th scope="col" class="px-4 py-3">Album</th>
+							<th scope="col" class="px-4 py-3 text-right">Duration</th>
 						</tr>
 					</thead>
 					<tbody>

@@ -60,17 +60,22 @@ def _track_to_detail(track: Track) -> TrackDetail:
     responses={422: {"description": "Validation error"}},
 )
 async def list_tracks(
-    page: int = Query(default=1, ge=1),
-    pageSize: int = Query(default=50, ge=1, le=100, alias="pageSize"),  # noqa: N803
+    page: int = Query(default=1),
+    pageSize: int = Query(default=50, alias="pageSize"),  # noqa: N803
     search: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> PaginatedResponse[TrackInfo]:
     """Return a paginated list of tracks, optionally filtered by title/artist search."""
+    # Clamp pagination parameters per API contract
+    page = max(1, page)
+    page_size = max(1, min(100, pageSize))
+
     # Build base query
     base_query = select(Track)
 
     if search:
-        pattern = f"%{search}%"
+        escaped = search.replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         base_query = base_query.where(
             or_(
                 Track.title.ilike(pattern),
@@ -84,11 +89,11 @@ async def list_tracks(
     total_items: int = total_items_result.scalar_one()
 
     # Calculate pagination
-    total_pages = math.ceil(total_items / pageSize) if total_items > 0 else 0
-    offset = (page - 1) * pageSize
+    total_pages = math.ceil(total_items / page_size) if total_items > 0 else 0
+    offset = (page - 1) * page_size
 
     # Fetch page of tracks
-    data_query = base_query.order_by(Track.ingested_at.desc()).offset(offset).limit(pageSize)
+    data_query = base_query.order_by(Track.ingested_at.desc()).offset(offset).limit(page_size)
     result = await db.execute(data_query)
     tracks = result.scalars().all()
 
@@ -96,7 +101,7 @@ async def list_tracks(
         data=[_track_to_info(t) for t in tracks],
         pagination=PaginationMeta(
             page=page,
-            page_size=pageSize,
+            page_size=page_size,
             total_items=total_items,
             total_pages=total_pages,
         ),
@@ -122,7 +127,7 @@ async def get_track(
     if track is None:
         error_body = ErrorResponse(
             error=ErrorDetail(
-                code="TRACK_NOT_FOUND",
+                code="NOT_FOUND",
                 message=f"No track found with id {track_id}",
             )
         )

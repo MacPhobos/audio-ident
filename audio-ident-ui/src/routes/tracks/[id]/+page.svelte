@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { fetchTrackDetail, type TrackDetail } from '$lib/api/client';
+	import { fetchTrackDetail, ApiRequestError, type TrackDetail } from '$lib/api/client';
 	import {
 		formatDuration,
 		formatDate,
@@ -41,7 +41,9 @@
 
 	let track = $derived(trackQuery.data);
 	let is404 = $derived(
-		trackQuery.isError && trackQuery.error?.message?.includes('404')
+		trackQuery.isError &&
+			trackQuery.error instanceof ApiRequestError &&
+			trackQuery.error.status === 404
 	);
 
 	let embeddingIndexed = $derived(

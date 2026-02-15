@@ -222,17 +222,35 @@ class TestListTracks:
         assert body["pagination"]["pageSize"] == 2
         assert body["pagination"]["totalPages"] == 2
 
-    async def test_list_tracks_invalid_page_size_too_large(self, client: AsyncClient):
+    async def test_list_tracks_page_size_too_large_clamped(
+        self, client: AsyncClient, seed_tracks: list[Track]
+    ):
+        """pageSize > 100 is clamped to 100 per API contract (not rejected)."""
         resp = await client.get("/api/v1/tracks", params={"pageSize": 200})
-        assert resp.status_code == 422
+        assert resp.status_code == 200
 
-    async def test_list_tracks_invalid_page_size_zero(self, client: AsyncClient):
+        pagination = resp.json()["pagination"]
+        assert pagination["pageSize"] == 100
+
+    async def test_list_tracks_page_size_zero_clamped(
+        self, client: AsyncClient, seed_tracks: list[Track]
+    ):
+        """pageSize < 1 is clamped to 1 per API contract (not rejected)."""
         resp = await client.get("/api/v1/tracks", params={"pageSize": 0})
-        assert resp.status_code == 422
+        assert resp.status_code == 200
 
-    async def test_list_tracks_invalid_page_zero(self, client: AsyncClient):
+        pagination = resp.json()["pagination"]
+        assert pagination["pageSize"] == 1
+
+    async def test_list_tracks_page_zero_clamped(
+        self, client: AsyncClient, seed_tracks: list[Track]
+    ):
+        """page < 1 is clamped to 1 per API contract (not rejected)."""
         resp = await client.get("/api/v1/tracks", params={"page": 0})
-        assert resp.status_code == 422
+        assert resp.status_code == 200
+
+        pagination = resp.json()["pagination"]
+        assert pagination["page"] == 1
 
     async def test_list_tracks_data_shape(self, client: AsyncClient, seed_tracks: list[Track]):
         """Verify each track in the data list has the expected TrackInfo fields."""
@@ -277,7 +295,7 @@ class TestGetTrackDetail:
 
         body = resp.json()
         assert "error" in body
-        assert body["error"]["code"] == "TRACK_NOT_FOUND"
+        assert body["error"]["code"] == "NOT_FOUND"
         assert str(random_id) in body["error"]["message"]
 
     async def test_get_track_detail_invalid_uuid(self, client: AsyncClient):
