@@ -85,7 +85,7 @@ async def run_vibe_lane(
     #    Use run_in_executor to avoid blocking the asyncio event loop.
     #    Use semaphore to prevent concurrent CPU-bound inferences from
     #    degrading latency.
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     async with _clap_semaphore:
         embedding = await loop.run_in_executor(
             None,

@@ -19,7 +19,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audio.fingerprint import OlafMatch, olaf_query
+from app.audio.fingerprint import OlafError, OlafMatch, olaf_query
 from app.db.session import async_session_factory
 from app.models.track import Track
 from app.schemas.search import ExactMatch, TrackInfo
@@ -70,6 +70,8 @@ BYTES_PER_SAMPLE = 4
 async def run_exact_lane(
     pcm_16k: bytes,
     max_results: int = 10,
+    *,
+    session: AsyncSession | None = None,
 ) -> list[ExactMatch]:
     """Search by audio fingerprint using Olaf's LMDB inverted index.
 
@@ -82,6 +84,11 @@ async def run_exact_lane(
     Args:
         pcm_16k: Raw 16kHz mono float32 little-endian PCM data.
         max_results: Maximum number of results to return.
+        session: Optional async SQLAlchemy session for PostgreSQL metadata
+            lookups. If ``None``, a new session is created internally via
+            ``async_session_factory()``. Providing an external session
+            allows the Phase 5 orchestrator to share a single session
+            across both search lanes.
 
     Returns:
         List of ExactMatch results sorted by confidence descending.
@@ -114,7 +121,7 @@ async def run_exact_lane(
     top_matches = filtered[:max_results]
 
     # Look up track metadata from PostgreSQL
-    return await _enrich_with_metadata(top_matches)
+    return await _enrich_with_metadata(top_matches, session=session)
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +159,15 @@ async def _query_with_subwindows(
             window_results.append([])
             continue
 
-        matches = await olaf_query(window_pcm)
+        try:
+            matches = await olaf_query(window_pcm)
+        except OlafError:
+            logger.exception(
+                "Olaf query failed for sub-window [%.2f, %.2f]",
+                start_sec,
+                actual_stop,
+            )
+            matches = []
         window_results.append(matches)
 
     return _consensus_score(window_results)
@@ -166,8 +181,13 @@ async def _query_full_clip(pcm_16k: bytes) -> list[_ScoredCandidate]:
 
     Returns:
         List of scored candidates from the single query.
+        Returns empty list if Olaf raises an error (graceful degradation).
     """
-    matches = await olaf_query(pcm_16k)
+    try:
+        matches = await olaf_query(pcm_16k)
+    except OlafError:
+        logger.exception("Olaf query failed for full-clip exact search")
+        return []
     return _matches_to_candidates(matches)
 
 
@@ -426,6 +446,8 @@ def _track_to_info(track: Track) -> TrackInfo:
 
 async def _enrich_with_metadata(
     candidates: list[_ScoredCandidate],
+    *,
+    session: AsyncSession | None = None,
 ) -> list[ExactMatch]:
     """Look up track metadata from PostgreSQL and build ExactMatch responses.
 
@@ -435,6 +457,8 @@ async def _enrich_with_metadata(
 
     Args:
         candidates: Scored candidates with track UUIDs.
+        session: Optional async SQLAlchemy session. If ``None``, a new
+            session is created internally via ``async_session_factory()``.
 
     Returns:
         List of ExactMatch responses with full track metadata.
@@ -444,8 +468,11 @@ async def _enrich_with_metadata(
 
     track_ids = [c.track_uuid for c in candidates]
 
-    async with async_session_factory() as session:
+    if session is not None:
         tracks_by_id = await get_tracks_by_ids(session, track_ids)
+    else:
+        async with async_session_factory() as _session:
+            tracks_by_id = await get_tracks_by_ids(_session, track_ids)
 
     results: list[ExactMatch] = []
     for candidate in candidates:
