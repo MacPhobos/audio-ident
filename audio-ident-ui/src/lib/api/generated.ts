@@ -104,10 +104,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Audio
+         * @description Ingest a single audio file into the identification library.
+         *
+         *     The file is processed through the full pipeline:
+         *     1. SHA-256 hash check (duplicate detection)
+         *     2. Metadata extraction (title, artist, album)
+         *     3. Dual-rate PCM decode (16kHz + 48kHz)
+         *     4. Duration validation (3s - 30min)
+         *     5. Chromaprint content dedup
+         *     6. Olaf fingerprint indexing + CLAP embedding generation (parallel)
+         *     7. PostgreSQL track record insertion
+         *
+         *     Only one ingestion can run at a time (Olaf LMDB single-writer constraint).
+         *     If another ingestion is in progress, returns 429.
+         *
+         *     Requires X-Admin-Key header matching the ADMIN_API_KEY environment variable.
+         */
+        post: operations["ingest_audio_api_v1_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Body_ingest_audio_api_v1_ingest_post */
+        Body_ingest_audio_api_v1_ingest_post: {
+            /**
+             * Audio
+             * Format: binary
+             * @description Audio file to ingest (MP3, WAV, FLAC, OGG, WebM, MP4). Max 50 MB.
+             */
+            audio: string;
+        };
         /** Body_search_audio_api_v1_search_post */
         Body_search_audio_api_v1_search_post: {
             /**
@@ -162,6 +205,28 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * IngestResponse
+         * @description Response for a single-file ingest operation.
+         */
+        IngestResponse: {
+            /**
+             * Track Id
+             * Format: uuid
+             */
+            track_id: string;
+            /** Title */
+            title: string;
+            /** Artist */
+            artist?: string | null;
+            status: components["schemas"]["IngestStatus"];
+        };
+        /**
+         * IngestStatus
+         * @description Possible outcomes for a single-file ingest operation.
+         * @enum {string}
+         */
+        IngestStatus: "ingested" | "duplicate" | "error";
         /** PaginatedResponse[TrackInfo] */
         PaginatedResponse_TrackInfo_: {
             /** Data */
@@ -473,6 +538,69 @@ export interface operations {
             };
             /** @description Validation error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ingest_audio_api_v1_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Admin-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_ingest_audio_api_v1_ingest_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestResponse"];
+                };
+            };
+            /** @description Validation error (format, size, duration) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid admin API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Another ingestion is in progress */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

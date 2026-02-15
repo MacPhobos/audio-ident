@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     vibe_match_threshold: float = 0.60
     qdrant_search_limit: int = 50
 
+    # Admin
+    admin_api_key: str = ""  # Empty = ingest endpoint locked (fail-closed)
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

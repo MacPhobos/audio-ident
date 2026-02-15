@@ -51,6 +51,8 @@ class IngestResult:
     status: str = "pending"  # "success", "duplicate", "skipped", "error"
     error: str | None = None
     duration_seconds: float | None = None
+    title: str | None = None
+    artist: str | None = None
 
 
 @dataclass
@@ -105,6 +107,11 @@ async def ingest_file(
             if existing_id:
                 result.status = "duplicate"
                 result.track_id = existing_id
+                # Extract metadata so the response includes title/artist
+                # instead of falling back to the uploaded filename.
+                metadata = extract_metadata(file_path)
+                result.title = metadata.title or file_path.stem
+                result.artist = metadata.artist
                 logger.info(
                     "Skipping duplicate file: %s (hash: %s)",
                     file_path.name,
@@ -114,6 +121,8 @@ async def ingest_file(
 
         # Step 2: Extract metadata
         metadata = extract_metadata(file_path)
+        result.title = metadata.title or file_path.stem
+        result.artist = metadata.artist
 
         # Step 3: Decode to dual-rate PCM + validate duration
         file_bytes = file_path.read_bytes()

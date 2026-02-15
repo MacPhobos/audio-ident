@@ -10,8 +10,9 @@ from fastapi.responses import JSONResponse
 from qdrant_client import AsyncQdrantClient
 from sqlalchemy import text
 
+from app.auth.admin import AdminAuthError
 from app.db.engine import engine
-from app.routers import health, search, tracks, version
+from app.routers import health, ingest, search, tracks, version
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,19 @@ def create_app() -> FastAPI:
     application.include_router(version.router, prefix="/api/v1")
     application.include_router(search.router, prefix="/api/v1")
     application.include_router(tracks.router, prefix="/api/v1")
+    application.include_router(ingest.router, prefix="/api/v1")
+
+    @application.exception_handler(AdminAuthError)
+    async def admin_auth_error_handler(request: Request, exc: AdminAuthError) -> JSONResponse:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                }
+            },
+        )
 
     @application.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:

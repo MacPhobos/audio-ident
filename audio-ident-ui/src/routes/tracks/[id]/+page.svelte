@@ -46,9 +46,7 @@
 			trackQuery.error.status === 404
 	);
 
-	let embeddingIndexed = $derived(
-		track?.embedding_model != null && track?.embedding_dim != null
-	);
+	let embeddingIndexed = $derived(track?.embedding_model != null && track?.embedding_dim != null);
 </script>
 
 <svelte:head>
@@ -113,7 +111,7 @@
 			</div>
 		</div>
 
-	<!-- 404 State -->
+		<!-- 404 State -->
 	{:else if is404}
 		<div class="flex flex-col items-center gap-4 rounded-xl border bg-white px-6 py-12">
 			<AlertCircle class="h-10 w-10 text-gray-300" />
@@ -131,7 +129,7 @@
 			</a>
 		</div>
 
-	<!-- Error State (non-404) -->
+		<!-- Error State (non-404) -->
 	{:else if trackQuery.isError}
 		<div
 			class="flex flex-col items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-6 py-8"
@@ -149,12 +147,14 @@
 			</button>
 		</div>
 
-	<!-- Track Detail -->
+		<!-- Track Detail -->
 	{:else if track}
 		<!-- Title Section -->
 		<div class="mb-6">
 			<div class="flex items-start gap-3">
-				<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+				<div
+					class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"
+				>
 					<Music class="h-6 w-6" />
 				</div>
 				<div class="min-w-0">
@@ -194,7 +194,9 @@
 					</div>
 					<div class="flex justify-between text-sm">
 						<dt class="font-medium text-gray-500">Duration</dt>
-						<dd class="text-right font-mono text-gray-900">{formatDuration(track.duration_seconds)}</dd>
+						<dd class="text-right font-mono text-gray-900">
+							{formatDuration(track.duration_seconds)}
+						</dd>
 					</div>
 					<div class="flex justify-between text-sm">
 						<dt class="font-medium text-gray-500">Ingested</dt>
@@ -211,11 +213,15 @@
 				<dl class="space-y-3">
 					<div class="flex justify-between text-sm">
 						<dt class="font-medium text-gray-500">Format</dt>
-						<dd class="text-right font-mono text-gray-900">{track.format?.toUpperCase() ?? 'Unknown'}</dd>
+						<dd class="text-right font-mono text-gray-900">
+							{track.format?.toUpperCase() ?? 'Unknown'}
+						</dd>
 					</div>
 					<div class="flex justify-between text-sm">
 						<dt class="font-medium text-gray-500">Sample Rate</dt>
-						<dd class="text-right font-mono text-gray-900">{formatSampleRate(track.sample_rate)}</dd>
+						<dd class="text-right font-mono text-gray-900">
+							{formatSampleRate(track.sample_rate)}
+						</dd>
 					</div>
 					<div class="flex justify-between text-sm">
 						<dt class="font-medium text-gray-500">Channels</dt>
@@ -227,7 +233,9 @@
 					</div>
 					<div class="flex justify-between text-sm">
 						<dt class="font-medium text-gray-500">File Size</dt>
-						<dd class="text-right font-mono text-gray-900">{formatFileSize(track.file_size_bytes)}</dd>
+						<dd class="text-right font-mono text-gray-900">
+							{formatFileSize(track.file_size_bytes)}
+						</dd>
 					</div>
 				</dl>
 			</div>
@@ -247,7 +255,8 @@
 							<span class="block h-2.5 w-2.5 rounded-full bg-green-500" aria-label="Indexed"></span>
 							<span class="text-gray-900">Indexed</span>
 						{:else}
-							<span class="block h-2.5 w-2.5 rounded-full bg-red-500" aria-label="Not indexed"></span>
+							<span class="block h-2.5 w-2.5 rounded-full bg-red-500" aria-label="Not indexed"
+							></span>
 							<span class="text-gray-900">Not indexed</span>
 						{/if}
 					</span>
@@ -261,7 +270,8 @@
 							<span class="block h-2.5 w-2.5 rounded-full bg-green-500" aria-label="Indexed"></span>
 							<span class="text-gray-900">Indexed ({track.embedding_dim}-dim)</span>
 						{:else}
-							<span class="block h-2.5 w-2.5 rounded-full bg-gray-400" aria-label="Not indexed"></span>
+							<span class="block h-2.5 w-2.5 rounded-full bg-gray-400" aria-label="Not indexed"
+							></span>
 							<span class="text-gray-900">Not indexed</span>
 						{/if}
 					</span>
@@ -270,7 +280,10 @@
 				<!-- File Hash -->
 				<div class="flex items-center justify-between text-sm">
 					<span class="font-medium text-gray-500">File Hash (SHA-256)</span>
-					<span class="truncate pl-4 font-mono text-xs text-gray-600" title={track.file_hash_sha256}>
+					<span
+						class="truncate pl-4 font-mono text-xs text-gray-600"
+						title={track.file_hash_sha256}
+					>
 						{track.file_hash_sha256.slice(0, 16)}...
 					</span>
 				</div>

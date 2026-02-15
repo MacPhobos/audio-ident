@@ -3,10 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { onDestroy } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
-	import {
-		fetchTracks,
-		type PaginatedTrackResponse
-	} from '$lib/api/client';
+	import { fetchTracks, type PaginatedTrackResponse } from '$lib/api/client';
 	import { formatDuration } from '$lib/format';
 	import {
 		Library,
@@ -105,15 +102,15 @@
 			<Library class="h-6 w-6 text-gray-700" />
 			<h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Track Library</h1>
 		</div>
-		<p class="mt-1 text-sm text-gray-500">
-			Browse and search all ingested tracks
-		</p>
+		<p class="mt-1 text-sm text-gray-500">Browse and search all ingested tracks</p>
 	</header>
 
 	<!-- Search Bar -->
 	<div class="mb-6">
 		<div class="relative">
-			<Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+			<Search
+				class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+			/>
 			<input
 				type="search"
 				placeholder="Search by title or artist..."
@@ -167,7 +164,7 @@
 			</div>
 		</div>
 
-	<!-- Error State -->
+		<!-- Error State -->
 	{:else if tracksQuery.isError}
 		<div
 			class="flex flex-col items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-6 py-8"
@@ -186,7 +183,7 @@
 			</button>
 		</div>
 
-	<!-- Empty State -->
+		<!-- Empty State -->
 	{:else if tracks.length === 0}
 		<div class="flex flex-col items-center gap-3 rounded-xl border bg-white px-6 py-12">
 			<Library class="h-10 w-10 text-gray-300" />
@@ -197,17 +194,17 @@
 				</p>
 			{:else}
 				<p class="text-center font-medium text-gray-700">No tracks in library</p>
-				<p class="text-center text-sm text-gray-500">
-					Ingest audio files to populate the library.
-				</p>
+				<p class="text-center text-sm text-gray-500">Ingest audio files to populate the library.</p>
 			{/if}
 		</div>
 
-	<!-- Results -->
+		<!-- Results -->
 	{:else}
 		<div aria-live="polite" aria-atomic="true">
 			<p class="sr-only">
-				Showing {rangeStart} to {rangeEnd} of {totalItems} tracks{currentSearch ? ` matching "${currentSearch}"` : ''}
+				Showing {rangeStart} to {rangeEnd} of {totalItems} tracks{currentSearch
+					? ` matching "${currentSearch}"`
+					: ''}
 			</p>
 		</div>
 		<!-- Desktop Table (>= 640px) -->
@@ -215,7 +212,9 @@
 			<div class="overflow-hidden rounded-xl border bg-white">
 				<table class="w-full text-sm">
 					<thead>
-						<tr class="border-b bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+						<tr
+							class="border-b bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
+						>
 							<th scope="col" class="px-4 py-3">Title</th>
 							<th scope="col" class="px-4 py-3">Artist</th>
 							<th scope="col" class="px-4 py-3">Album</th>
@@ -284,9 +283,7 @@
 						onclick={() => goToPage(currentPage - 1)}
 						disabled={!hasPrev}
 						class="inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors
-							{hasPrev
-								? 'text-gray-700 hover:bg-gray-50'
-								: 'cursor-not-allowed text-gray-300'}"
+							{hasPrev ? 'text-gray-700 hover:bg-gray-50' : 'cursor-not-allowed text-gray-300'}"
 						aria-disabled={!hasPrev}
 						aria-label="Previous page"
 					>
@@ -300,9 +297,7 @@
 						onclick={() => goToPage(currentPage + 1)}
 						disabled={!hasNext}
 						class="inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors
-							{hasNext
-								? 'text-gray-700 hover:bg-gray-50'
-								: 'cursor-not-allowed text-gray-300'}"
+							{hasNext ? 'text-gray-700 hover:bg-gray-50' : 'cursor-not-allowed text-gray-300'}"
 						aria-disabled={!hasNext}
 						aria-label="Next page"
 					>

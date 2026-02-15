@@ -8,6 +8,7 @@ export type TrackInfo = components['schemas']['TrackInfo'];
 export type TrackDetail = components['schemas']['TrackDetail'];
 export type PaginatedTrackResponse = components['schemas']['PaginatedResponse_TrackInfo_'];
 export type PaginationMeta = components['schemas']['PaginationMeta'];
+export type IngestResponse = components['schemas']['IngestResponse'];
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -178,4 +179,54 @@ export async function searchAudio(
 	}
 
 	return res.json() as Promise<SearchResponse>;
+}
+
+export async function ingestAudio(
+	file: File,
+	adminKey: string,
+	signal?: AbortSignal
+): Promise<IngestResponse> {
+	const form = new FormData();
+	form.append('audio', file, file.name);
+
+	const res = await fetch(`${BASE_URL}/api/v1/ingest`, {
+		method: 'POST',
+		body: form,
+		headers: {
+			'X-Admin-Key': adminKey
+		},
+		signal
+	});
+
+	if (!res.ok) {
+		let apiError: ApiError = {
+			code: 'UNKNOWN',
+			message: `Ingest failed: ${res.status} ${res.statusText}`,
+			status: res.status
+		};
+
+		try {
+			const body = await res.json();
+			if (body?.error) {
+				apiError = {
+					code: body.error.code ?? 'UNKNOWN',
+					message: body.error.message ?? apiError.message,
+					status: res.status
+				};
+			} else if (body?.detail) {
+				const msg = Array.isArray(body.detail)
+					? body.detail.map((d: Record<string, unknown>) => d.msg).join('; ')
+					: typeof body.detail === 'object'
+						? (body.detail.error?.message ?? JSON.stringify(body.detail))
+						: String(body.detail);
+				apiError = { code: 'VALIDATION_ERROR', message: msg, status: res.status };
+			}
+		} catch {
+			// Use the default error built above
+		}
+
+		throw new ApiRequestError(apiError);
+	}
+
+	return res.json() as Promise<IngestResponse>;
 }

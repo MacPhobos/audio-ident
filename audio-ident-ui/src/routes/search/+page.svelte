@@ -223,7 +223,12 @@
 	<!-- Results Section -->
 	{#if pageState === 'results'}
 		<section class="space-y-4">
-			<SearchResults response={searchResponse} isLoading={false} error={searchError} onTrackClick={saveSearchState} />
+			<SearchResults
+				response={searchResponse}
+				isLoading={false}
+				error={searchError}
+				onTrackClick={saveSearchState}
+			/>
 
 			<div class="text-center">
 				<button

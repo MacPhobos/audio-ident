@@ -7,6 +7,7 @@
 	// Active route detection
 	let isSearchActive = $derived(page.url.pathname === '/search');
 	let isTracksActive = $derived(page.url.pathname.startsWith('/tracks'));
+	let isAdminActive = $derived(page.url.pathname.startsWith('/admin'));
 
 	// Health status for the status dot
 	const healthQuery = createQuery<HealthResponse>(() => ({
@@ -57,6 +58,17 @@
 				aria-current={isTracksActive ? 'page' : undefined}
 			>
 				Library
+			</a>
+
+			<!-- Admin (subdued link) -->
+			<a
+				href="/admin/ingest"
+				class="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium
+               transition-colors sm:px-3 sm:text-sm
+               {isAdminActive ? 'text-gray-900' : 'text-gray-400 hover:text-gray-700'}"
+				aria-current={isAdminActive ? 'page' : undefined}
+			>
+				Admin
 			</a>
 			<!-- eslint-enable svelte/no-navigation-without-resolve -->
 

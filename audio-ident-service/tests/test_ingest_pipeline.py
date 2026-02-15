@@ -211,7 +211,7 @@ async def test_file_hash_duplicate_detected(
     mock_qdrant_client,
     mock_session,
 ):
-    """Step 2: file hash already in DB -> status='duplicate'."""
+    """Step 2: file hash already in DB -> status='duplicate' with metadata."""
     existing_uuid = uuid.uuid4()
 
     mock_session_ctx = AsyncMock()
@@ -231,6 +231,19 @@ async def test_file_hash_duplicate_detected(
             new_callable=AsyncMock,
             return_value=existing_uuid,
         ),
+        patch(
+            "app.ingest.pipeline.extract_metadata",
+            return_value=MagicMock(
+                title="Duplicate Song",
+                artist="Duplicate Artist",
+                album=None,
+                sample_rate=44100,
+                channels=2,
+                bitrate=320000,
+                format="mp3",
+                file_size_bytes=1024,
+            ),
+        ),
     ):
         result = await ingest_file(
             temp_single_file,
@@ -242,6 +255,9 @@ async def test_file_hash_duplicate_detected(
 
     assert result.status == "duplicate"
     assert result.track_id == existing_uuid
+    # SIG-1 fix: title/artist should be populated from metadata, not None
+    assert result.title == "Duplicate Song"
+    assert result.artist == "Duplicate Artist"
 
 
 @pytest.mark.asyncio
