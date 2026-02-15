@@ -1,28 +1,38 @@
 <script lang="ts">
-	import type { SearchResponse } from '$lib/api/generated';
+	import type { SearchResponse } from '$lib/api/client';
 	import { Music, Fingerprint, Waves, AlertCircle, Search } from 'lucide-svelte';
 
 	let {
 		response,
 		isLoading,
-		error
+		error,
+		onTrackClick
 	}: {
 		response: SearchResponse | null;
 		isLoading: boolean;
 		error: string | null;
+		onTrackClick?: () => void;
 	} = $props();
+
+	function handleTrackNav() {
+		onTrackClick?.();
+	}
+
+	// Provide safe accessors for optional arrays
+	let exactMatches = $derived(response?.exact_matches ?? []);
+	let vibeMatches = $derived(response?.vibe_matches ?? []);
 
 	// Tab priority: if top exact match has high confidence, show that first
 	let defaultTab = $derived.by<'exact' | 'vibe'>(() => {
 		if (!response) return 'exact';
-		if (response.exact_matches.length > 0 && response.exact_matches[0].confidence >= 0.85) {
+		if (exactMatches.length > 0 && exactMatches[0].confidence >= 0.85) {
 			return 'exact';
 		}
-		if (response.vibe_matches.length > 0 && response.exact_matches.length === 0) {
+		if (vibeMatches.length > 0 && exactMatches.length === 0) {
 			return 'vibe';
 		}
-		if (response.vibe_matches.length > 0 && response.exact_matches.length > 0) {
-			if (response.exact_matches[0].confidence < 0.85) {
+		if (vibeMatches.length > 0 && exactMatches.length > 0) {
+			if (exactMatches[0].confidence < 0.85) {
 				return 'vibe';
 			}
 		}
@@ -39,12 +49,12 @@
 
 	let currentTab = $derived(activeTab ?? defaultTab);
 
-	let hasExact = $derived((response?.exact_matches.length ?? 0) > 0);
-	let hasVibe = $derived((response?.vibe_matches.length ?? 0) > 0);
+	let hasExact = $derived(exactMatches.length > 0);
+	let hasVibe = $derived(vibeMatches.length > 0);
 	let hasAnyResults = $derived(hasExact || hasVibe);
 
-	function formatOffset(seconds: number | null): string {
-		if (seconds === null) return '';
+	function formatOffset(seconds: number | null | undefined): string {
+		if (seconds == null) return '';
 		const m = Math.floor(seconds / 60);
 		const s = Math.floor(seconds % 60);
 		return `${m}:${s.toString().padStart(2, '0')}`;
@@ -152,7 +162,7 @@
 				Exact ID
 				{#if hasExact}
 					<span class="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
-						{response.exact_matches.length}
+						{exactMatches.length}
 					</span>
 				{/if}
 			</button>
@@ -174,7 +184,7 @@
 					<span
 						class="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700"
 					>
-						{response.vibe_matches.length}
+						{vibeMatches.length}
 					</span>
 				{/if}
 			</button>
@@ -193,7 +203,7 @@
 							</p>
 						</div>
 					{:else}
-						{#each response.exact_matches as match, i}
+						{#each exactMatches as match, i}
 							<div class="rounded-xl border bg-white p-4 transition-shadow hover:shadow-md">
 								<div class="flex items-start gap-3">
 									<div
@@ -202,8 +212,15 @@
 										<Music class="h-5 w-5" />
 									</div>
 									<div class="min-w-0 flex-1">
-										<p class="truncate font-medium text-gray-900">
-											{match.track.title}
+										<p class="truncate font-medium">
+											<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic route -->
+											<a
+												href="/tracks/{match.track.id}"
+												onclick={handleTrackNav}
+												class="text-gray-900 hover:text-indigo-600 hover:underline"
+											>
+												{match.track.title}
+											</a>
 										</p>
 										{#if match.track.artist}
 											<p class="truncate text-sm text-gray-600">
@@ -216,7 +233,7 @@
 											</p>
 										{/if}
 										<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-											{#if match.offset_seconds !== null}
+											{#if match.offset_seconds != null}
 												<span>Match at {formatOffset(match.offset_seconds)}</span>
 												<span class="text-gray-300">&middot;</span>
 											{/if}
@@ -247,7 +264,7 @@
 							</p>
 						</div>
 					{:else}
-						{#each response.vibe_matches as match, i}
+						{#each vibeMatches as match, i}
 							<div class="rounded-xl border bg-white p-4 transition-shadow hover:shadow-md">
 								<div class="flex items-start gap-3">
 									<div
@@ -256,8 +273,15 @@
 										{i + 1}
 									</div>
 									<div class="min-w-0 flex-1">
-										<p class="truncate font-medium text-gray-900">
-											{match.track.title}
+										<p class="truncate font-medium">
+											<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic route -->
+											<a
+												href="/tracks/{match.track.id}"
+												onclick={handleTrackNav}
+												class="text-gray-900 hover:text-indigo-600 hover:underline"
+											>
+												{match.track.title}
+											</a>
 										</p>
 										{#if match.track.artist}
 											<p class="truncate text-sm text-gray-600">

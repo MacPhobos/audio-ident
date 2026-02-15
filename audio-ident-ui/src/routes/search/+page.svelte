@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createMutation } from '@tanstack/svelte-query';
 	import { searchAudio, ApiRequestError } from '$lib/api/client';
-	import type { SearchMode, SearchResponse } from '$lib/api/generated';
+	import type { SearchMode, SearchResponse } from '$lib/api/client';
 	import AudioRecorder from '$lib/components/AudioRecorder.svelte';
 	import AudioUploader from '$lib/components/AudioUploader.svelte';
 	import SearchResults from '$lib/components/SearchResults.svelte';
@@ -21,6 +21,42 @@
 	let searchError = $state<string | null>(null);
 
 	let abortController: AbortController | null = null;
+
+	// ---------------------------------------------------------------------------
+	// Search state preservation (sessionStorage)
+	// ---------------------------------------------------------------------------
+
+	const SEARCH_STATE_KEY = 'audio-ident-search-state';
+
+	function saveSearchState() {
+		if (typeof sessionStorage === 'undefined') return;
+		sessionStorage.setItem(
+			SEARCH_STATE_KEY,
+			JSON.stringify({
+				response: searchResponse,
+				mode: searchMode,
+				inputMode: inputMode
+			})
+		);
+	}
+
+	// Restore state from sessionStorage when returning from track detail
+	$effect(() => {
+		if (typeof sessionStorage === 'undefined') return;
+		const saved = sessionStorage.getItem(SEARCH_STATE_KEY);
+		if (saved) {
+			try {
+				const state = JSON.parse(saved);
+				searchResponse = state.response;
+				searchMode = state.mode;
+				inputMode = state.inputMode;
+				pageState = 'results';
+			} catch {
+				// Ignore corrupt data
+			}
+			sessionStorage.removeItem(SEARCH_STATE_KEY);
+		}
+	});
 
 	// ---------------------------------------------------------------------------
 	// Mutation
@@ -187,7 +223,7 @@
 	<!-- Results Section -->
 	{#if pageState === 'results'}
 		<section class="space-y-4">
-			<SearchResults response={searchResponse} isLoading={false} error={searchError} />
+			<SearchResults response={searchResponse} isLoading={false} error={searchError} onTrackClick={saveSearchState} />
 
 			<div class="text-center">
 				<button

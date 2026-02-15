@@ -1,8 +1,13 @@
-import type { components, SearchMode, SearchResponse } from './generated';
+import type { components } from './generated';
 
 export type HealthResponse = components['schemas']['HealthResponse'];
 export type VersionResponse = components['schemas']['VersionResponse'];
-export type { SearchMode, SearchResponse };
+export type SearchMode = components['schemas']['SearchMode'];
+export type SearchResponse = components['schemas']['SearchResponse'];
+export type TrackInfo = components['schemas']['TrackInfo'];
+export type TrackDetail = components['schemas']['TrackDetail'];
+export type PaginatedTrackResponse = components['schemas']['PaginatedResponse_TrackInfo_'];
+export type PaginationMeta = components['schemas']['PaginationMeta'];
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -74,6 +79,23 @@ export function fetchHealth(): Promise<HealthResponse> {
 
 export function fetchVersion(): Promise<VersionResponse> {
 	return fetchJSON<VersionResponse>('/api/v1/version');
+}
+
+export function fetchTracks(
+	page: number = 1,
+	pageSize: number = 50,
+	search?: string
+): Promise<PaginatedTrackResponse> {
+	const params = new URLSearchParams({
+		page: String(page),
+		pageSize: String(pageSize)
+	});
+	if (search) params.set('search', search);
+	return fetchJSON<PaginatedTrackResponse>(`/api/v1/tracks?${params}`);
+}
+
+export function fetchTrackDetail(id: string): Promise<TrackDetail> {
+	return fetchJSON<TrackDetail>(`/api/v1/tracks/${id}`);
 }
 
 export async function searchAudio(
