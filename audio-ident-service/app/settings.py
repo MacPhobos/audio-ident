@@ -37,6 +37,7 @@ class Settings(BaseSettings):
 
     # Olaf
     olaf_lmdb_path: str = "./data/olaf_db"
+    olaf_bin_path: str = "olaf_c"
 
     # Embedding
     embedding_model: str = "clap-htsat-large"
