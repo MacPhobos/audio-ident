@@ -61,7 +61,7 @@ tests/             # pytest test suite
 - Python version pinned to 3.12 in `.tool-versions` at repo root.
 - Pin critical dependencies to compatible ranges:
   - `qdrant-client>=1.12,<2.0` (must match Qdrant server version)
-  - `laion-clap>=1.1` (larger_clap_music checkpoint)
+  - HuggingFace Transformers CLAP (`clap-htsat-large` backbone)
   - ffmpeg >= 5.0 (verified at startup)
 
 ## Audio Processing Conventions
@@ -127,7 +127,7 @@ All configuration is loaded via `app/settings.py` (pydantic-settings). Copy `.en
 | `QDRANT_COLLECTION_NAME` | `audio_embeddings` | Qdrant collection for CLAP vectors |
 | `OLAF_LMDB_PATH` | `./data/olaf_db` | Olaf fingerprint index directory |
 | `AUDIO_STORAGE_ROOT` | `./data` | Root directory for raw audio file storage |
-| `EMBEDDING_MODEL` | `clap-laion-music` | CLAP model identifier |
+| `EMBEDDING_MODEL` | `clap-htsat-large` | CLAP model identifier |
 | `EMBEDDING_DIM` | `512` | CLAP embedding dimension |
 | `SERVICE_PORT` | `17010` | Uvicorn listen port |
 

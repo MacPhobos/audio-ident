@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import uuid
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+
+class IngestStatus(StrEnum):
+    """Possible outcomes for a single-file ingest operation."""
+
+    INGESTED = "ingested"
+    DUPLICATE = "duplicate"
+    ERROR = "error"
 
 
 class IngestResponse(BaseModel):
@@ -11,7 +20,7 @@ class IngestResponse(BaseModel):
     track_id: uuid.UUID
     title: str
     artist: str | None = None
-    status: str  # "ingested", "duplicate", "error"
+    status: IngestStatus
 
 
 class IngestError(BaseModel):

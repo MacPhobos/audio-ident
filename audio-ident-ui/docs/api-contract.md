@@ -283,7 +283,7 @@ Upload an audio clip and search for matches. Supports exact fingerprint matching
                 "ingested_at": "2026-02-14T10:31:00Z"
             },
             "similarity": 0.87,
-            "embedding_model": "clap-laion-music"
+            "embedding_model": "clap-htsat-large"
         }
     ],
     "mode_used": "both"
@@ -437,7 +437,7 @@ Retrieve full metadata for a single track, including fingerprint and embedding s
     "file_hash_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "file_size_bytes": 14230528,
     "olaf_indexed": true,
-    "embedding_model": "clap-laion-music",
+    "embedding_model": "clap-htsat-large",
     "embedding_dim": 512,
     "updated_at": "2026-02-14T10:30:05Z"
 }

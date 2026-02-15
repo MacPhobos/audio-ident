@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Float, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,7 +27,7 @@ class Track(Base):
 
     # File identity
     file_hash_sha256: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Chromaprint (ingestion-time content dedup ONLY)

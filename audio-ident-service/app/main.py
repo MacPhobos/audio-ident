@@ -33,7 +33,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await _check_postgres()
         logger.info("PostgreSQL connection verified")
     except Exception as exc:
-        raise SystemExit(f"FATAL: Cannot reach PostgreSQL. Error: {exc}") from exc
+        logger.debug("PostgreSQL connection error: %s", exc)
+        raise SystemExit(
+            "FATAL: Cannot reach PostgreSQL. "
+            "Check DATABASE_URL and ensure the server is running."
+        ) from exc
 
     # 2. Check Qdrant
     qdrant = AsyncQdrantClient(
@@ -44,8 +48,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await _check_qdrant(qdrant)
         logger.info("Qdrant connection verified at %s", settings.qdrant_url)
     except Exception as exc:
+        logger.debug("Qdrant connection error: %s", exc)
         raise SystemExit(
-            f"FATAL: Cannot reach Qdrant at {settings.qdrant_url}. Error: {exc}"
+            "FATAL: Cannot reach Qdrant. " "Check QDRANT_URL and ensure the server is running."
         ) from exc
 
     app.state.qdrant = qdrant
@@ -83,7 +88,7 @@ def create_app() -> FastAPI:
             status_code=500,
             content={
                 "error": {
-                    "code": "INTERNAL_SERVER_ERROR",
+                    "code": "INTERNAL_ERROR",
                     "message": "An unexpected error occurred.",
                     "details": None,
                 }
