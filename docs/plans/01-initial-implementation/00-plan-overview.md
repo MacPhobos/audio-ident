@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Audio-ident v1 delivers a dual-mode audio search system: **exact fingerprint identification** (Olaf) and **vibe similarity search** (LAION CLAP + Qdrant). Users upload or record audio via browser; the backend runs both search lanes in parallel and returns combined results.
+Audio-ident v1 delivers a dual-mode audio search system: **exact fingerprint identification** (Olaf) and **vibe similarity search** (HuggingFace Transformers CLAP + Qdrant). Users upload or record audio via browser; the backend runs both search lanes in parallel and returns combined results.
 
 The implementation is structured in **7 phases** (validation, infrastructure, ingestion, search lanes, orchestration, frontend, evaluation) totaling **26-38 developer-days**. A validation phase gates the entire project: if any critical technology choice fails, we pivot before investing in production code.
 
@@ -101,8 +101,8 @@ Phase 7: Evaluation (3-4d)
 | # | Risk | Likelihood | Impact | Mitigation | Phase |
 |---|------|-----------|--------|------------|-------|
 | 1 | Olaf CFFI compilation fails on target platform | Medium | High | Validate in Phase 1 Prototype 1; Dejavu as Plan B | 1 |
-| 2 | CLAP CPU inference exceeds latency budget (>5s) | High | High | Validate in Phase 1 Prototype 2; PANNs Cnn14 fallback | 1 |
-| 3 | laion-clap pip package dependency conflicts (numpy/PyTorch) | Medium | Medium | Test in Phase 1 Prototype 5; HuggingFace Transformers as alt path | 1 |
+| 2 | ~~CLAP CPU inference exceeds latency budget (>5s)~~ | ~~High~~ | ~~High~~ | **RETIRED** — HF Transformers CLAP inference is 0.208s p50 (sub-300ms), well within 3s budget | 1 |
+| 3 | ~~laion-clap pip package dependency conflicts (numpy/PyTorch)~~ | ~~Medium~~ | ~~Medium~~ | **RETIRED** — Switched to HuggingFace Transformers CLAP; no laion-clap dependency | 1 |
 | 4 | Browser MediaRecorder codec inconsistency (Safari) | Medium | Medium | Test in Phase 1 Prototype 4; server-side ffmpeg handles any codec | 1, 6 |
 | 5 | 48kHz PCM pipeline complexity / storage overhead | Low | Medium | Dual-rate decode in parallel; no 48kHz cache (on-the-fly) | 3 |
 
@@ -110,10 +110,10 @@ Phase 7: Evaluation (3-4d)
 | # | Risk | Mitigation |
 |---|------|------------|
 | 6 | Olaf AGPL-3.0 license restricts commercialization | Document; Dejavu (MIT) as Plan B if needed |
-| 7 | Memory spikes during batch ingestion (concurrent workers + CLAP model) | Limit concurrency; process sequentially if <8GB RAM |
+| 7 | Memory spikes during batch ingestion (concurrent workers + CLAP model) | Limit concurrency; process sequentially if <16GB RAM (dev) or <32GB RAM (production at scale) |
 | 8 | Qdrant collection corruption | Persistent Docker volume + snapshots; `make rebuild-index` recovers |
 | 9 | ffmpeg version differences across platforms | Pin ffmpeg >=5.0 in Docker; test on macOS Homebrew |
-| 10 | Cold-start latency (CLAP model load ~5-15s on first request) | Pre-load in FastAPI lifespan handler |
+| 10 | Cold-start latency (CLAP model load ~1s with HF Transformers on first request) | Pre-load in FastAPI lifespan handler [Updated: was ~5-15s with laion-clap; now ~1s with HF Transformers] |
 
 ---
 
@@ -127,7 +127,7 @@ Phase 7: Evaluation (3-4d)
 | Vector DB | Qdrant | v1.16.3 | Chunked audio embeddings (~940K vectors) |
 | Query-time fingerprinting | Olaf (C + CFFI) | latest | Short-fragment exact ID with offset, LMDB index |
 | Content dedup fingerprinting | Chromaprint (pyacoustid) | >=1.3 | Ingestion-time only, not used for search |
-| Embedding model | LAION CLAP (larger_clap_music) | >=1.1 | 512-dim audio-text embeddings, Apache-2.0 |
+| Embedding model | HuggingFace Transformers CLAP (`laion/larger_clap_music_and_speech`) | >=4.40 | HTSAT-large, 512-dim audio embeddings, Apache-2.0 |
 | Audio decoding | ffmpeg | >=5.0 | All formats -> PCM (16kHz + 48kHz) |
 | Metadata extraction | mutagen | >=1.47 | ID3, Vorbis, MP4 tags |
 | Frontend | SvelteKit + Svelte 5 | ^2.51 / ^5.51 | Search UI with mic recording |
@@ -145,7 +145,7 @@ Phase 7: Evaluation (3-4d)
 | Vector count | ~940K (not ~20K) | One per chunk, not one per track |
 | Browser bitrate | 128kbps (not 64kbps) | Preserves spectral detail for fingerprinting |
 | Search latency model | max(exact, vibe) | asyncio.gather waits for both; not min() |
-| CLAP model lifecycle | Pre-load in lifespan | Avoids 5-15s cold-start on first request |
+| CLAP model lifecycle | Pre-load in lifespan | Avoids ~1s cold-start on first request [Updated: HF Transformers loads in ~1.1s vs ~22s for laion-clap] |
 
 ---
 
@@ -222,3 +222,19 @@ Phase 7: Evaluation (3-4d)
 4. **Define a compound-marginal policy**: "If 2+ prototypes are Marginal, treat the project as Conditional Go and add 3 days to the estimate."
 5. **Add a system dependencies checklist** (or Dockerfile) as a Phase 2 deliverable.
 6. **Specify "most likely" effort estimate** alongside the range (suggested: ~32d).
+
+---
+
+## Phase 1 Validation Amendments (2026-02-14)
+
+The following changes were applied based on Phase 1 validation prototype results:
+
+1. **CLAP implementation switched** from `laion-clap` (HTSAT-tiny only) to HuggingFace Transformers CLAP (`laion/larger_clap_music_and_speech`), providing true HTSAT-large with 67.8M audio encoder parameters
+2. **Model load time**: Improved from 22.2s (MARGINAL) to 1.1s (GO) with HF Transformers
+3. **Peak memory**: Reduced from 1,578 MB to 844 MB with HF Transformers
+4. **Inference latency**: 0.208s p50 for 10s clips (vs 0.03s with laion-clap) — both well within 3s GO threshold
+5. **Dual-rate pipeline confirmed**: 48kHz for CLAP, 16kHz for Olaf (mean cosine similarity at 16kHz = 0.88, below 0.95 threshold)
+6. **Olaf compilation risk retired**: Compiles cleanly on macOS ARM64, bundles own FFT (pffft) and LMDB
+7. **Qdrant performance exceeds expectations**: p95 = 4.2ms at 50K vectors (threshold: <200ms)
+8. **Production RAM**: 32GB minimum recommended (Qdrant ~11GB + CLAP ~844MB + PostgreSQL + OS)
+9. **Development RAM**: 16GB sufficient with smaller datasets

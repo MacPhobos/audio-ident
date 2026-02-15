@@ -349,6 +349,8 @@ Display contextual tips (from 09-reality-check.md §9.5):
 
 ## Step 6: Browser Compatibility Testing (~4 hours)
 
+> **[Updated]** This is the first phase where browser recording is actually tested with real hardware. Phase 1 validation created codec detection utilities and MediaRecorder wrappers but did not perform end-to-end browser recording tests. Budget extra time for unexpected issues.
+
 **Reference**: 10-browser-recording.md (compatibility table)
 
 ### Test Matrix
@@ -405,6 +407,7 @@ Display contextual tips (from 09-reality-check.md §9.5):
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
+| [Updated] Browser recording not yet tested with real hardware | High | Medium | Phase 1 created browser recording tools and codec detection code, but actual browser recording was not manually tested. The team accepted this risk -- browser testing will occur during this phase. Budget extra time for unexpected codec/permission issues, especially Safari iOS. |
 | Safari WebM recording unreliable on older versions | Medium | Medium | MP4/AAC fallback always available; test on Safari 18.4+ |
 | iOS audio session interrupted by phone call | Low | Low | Handle AudioContext state changes; re-request on resume |
 | Mobile mic quality too poor for fingerprinting | Medium | Medium | Recording guidance tips; vibe search degrades more gracefully |

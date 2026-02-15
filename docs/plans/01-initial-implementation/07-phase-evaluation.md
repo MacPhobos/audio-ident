@@ -12,6 +12,10 @@ This phase creates a test corpus, runs all queries through both search lanes, me
 
 **Reference**: 02-fingerprinting-survey.md §2.4, 03-embeddings-and-qdrant.md §3.6, 09-reality-check.md
 
+> **[Updated] HTSAT-large confirmed.** Phase 1 validation confirmed that HuggingFace Transformers CLAP provides true HTSAT-large (67.8M audio params), not the HTSAT-tiny model originally planned with laion-clap. Quality expectations from the research phase should be achievable. Memory footprint is ~844 MB peak (down from ~1,578 MB with laion-clap).
+
+> **[Updated] Dual-rate pipeline.** The pipeline uses 48 kHz for CLAP embeddings and 16 kHz for Olaf fingerprints. Phase 1 validation found that 16 kHz vs 48 kHz embeddings have a mean cosine similarity of 0.88 -- close but not identical. When evaluating vibe search results, verify that query audio resampled to 48 kHz produces meaningful vibe matches. If vibe accuracy is unexpectedly low, check that query preprocessing uses 48 kHz (not 16 kHz) for the CLAP lane.
+
 ---
 
 ## Step 1: Build Test Corpus (~1 day)
@@ -543,7 +547,7 @@ All plan files correctly reference the research documents. Key references verifi
 
 - Qdrant: Consistently pinned to v1.16.3 across all plans. OK.
 - PostgreSQL: Consistently pinned to 16. OK.
-- CLAP: `>=1.1` in overview, not pinned in Phase 3 (`uv add laion-clap` with no version). Pin it.
+- [Updated] CLAP: Now using `transformers` + `torch` (HF Transformers). The old `laion-clap` package is no longer used. Pin `transformers` to a compatible range.
 - ffmpeg: `>=5.0` in overview, not verified at runtime. Add startup check.
 - `qdrant-client`: Not version-pinned anywhere. Pin it.
 
@@ -559,4 +563,4 @@ All file paths are consistent across plans:
 
 1. **No integration test that spans Phase 3 → Phase 4 → Phase 5.** Each phase has its own tests, but there's no end-to-end test that ingests a track and then searches for it via the API. Phase 5's integration tests use `httpx.AsyncClient` but may use mocked data. Add a true E2E test: ingest 5 tracks, then search for one.
 
-2. **CLAP model loading appears in Phase 3 (ingestion) and Phase 5 (search).** During ingestion, CLAP is needed for embedding generation. During search, CLAP is needed for query embedding. Are these the same model instance? The Phase 5 lifespan handler loads CLAP into `app.state.clap_model`, but Phase 3's `generate_chunked_embeddings()` loads its own instance via `load_clap_model()`. This could mean **two copies of CLAP in memory (~1.2-2GB total)** if ingestion and search run simultaneously. Unify the model instance.
+2. **[Updated] CLAP model loading appears in Phase 3 (ingestion) and Phase 5 (search).** During ingestion, CLAP is needed for embedding generation. During search, CLAP is needed for query embedding. Are these the same model instance? The Phase 5 lifespan handler loads CLAP into `app.state.clap_model`, but Phase 3's `generate_chunked_embeddings()` loads its own instance via `load_clap_model()`. This could mean **two copies of CLAP in memory (~1.7 GB total)** if ingestion and search run simultaneously (844 MB per instance with HF Transformers, down from ~1.2-2 GB per instance with laion-clap). Unify the model instance.

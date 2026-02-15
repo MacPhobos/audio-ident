@@ -15,6 +15,8 @@
 
 The exact ID lane takes 16kHz mono PCM audio, generates Olaf fingerprint hashes, queries the LMDB inverted index, applies consensus scoring, and returns ranked `ExactMatch` results with time offsets.
 
+**Olaf output format note**: Olaf produces comma-separated CSV output (not semicolons). Parse accordingly when reading query results from the CFFI wrapper.
+
 ### Step 1: Olaf Query Wrapper (~4 hours)
 
 **File**: `audio-ident-service/app/search/exact.py` (NEW)
@@ -150,6 +152,8 @@ cd audio-ident-service && uv run pytest tests/test_search_exact.py -v
 
 The vibe lane takes 48kHz mono PCM audio, generates a CLAP embedding, queries Qdrant for the top-50 nearest chunks, aggregates chunk scores to track-level results, and returns ranked `VibeMatch` results.
 
+**CLAP model config**: `laion/larger_clap_music_and_speech` via HuggingFace Transformers (`ClapModel` / `ClapProcessor`), HTSAT-large architecture, 512-dim audio embeddings. Load time ~1.1s, inference p50 ~0.208s for 10s clips, peak memory ~844 MB.
+
 ### Step 1: Query Embedding Generation (~4 hours)
 
 **File**: `audio-ident-service/app/search/vibe.py` (NEW)
@@ -164,14 +168,18 @@ async def run_vibe_lane(
     # 1. Convert PCM bytes to numpy array (f32le — already 32-bit float from ffmpeg)
     audio = np.frombuffer(pcm_48k, dtype=np.float32)
 
-    # 2. Generate CLAP embedding
-    embedding = clap_model.get_audio_embedding_from_data(x=audio, use_tensor=False)
-    # shape: (1, 512)
+    # 2. Generate CLAP embedding (HuggingFace Transformers API)
+    #    Model: laion/larger_clap_music_and_speech (HTSAT-large, 512-dim)
+    import torch
+    inputs = clap_processor(audios=[audio], sampling_rate=48000, return_tensors="pt")
+    with torch.no_grad():
+        embedding = clap_model.get_audio_features(**inputs)
+    # shape: (1, 512) — torch.Tensor, convert to numpy/list for Qdrant
 
     # 3. Query Qdrant for nearest CHUNKS
     search_results = await qdrant.query_points(
         collection_name=settings.qdrant_collection_name,
-        query=embedding[0].tolist(),
+        query=embedding[0].numpy().tolist(),
         limit=50,  # QDRANT_SEARCH_LIMIT — get more chunks than final results
         with_payload=True,
         search_params=models.SearchParams(hnsw_ef=128),

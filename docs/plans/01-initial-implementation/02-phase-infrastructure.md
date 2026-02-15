@@ -175,7 +175,7 @@ AUDIO_STORAGE_ROOT=./data
 OLAF_LMDB_PATH=./data/olaf_db
 
 # Embedding
-EMBEDDING_MODEL=clap-laion-music
+EMBEDDING_MODEL=clap-htsat-large
 EMBEDDING_DIM=512
 CLAP_SAMPLE_RATE=48000
 ```
@@ -398,7 +398,7 @@ class Settings(BaseSettings):
     olaf_lmdb_path: str = "./data/olaf_db"
 
     # Embedding
-    embedding_model: str = "clap-laion-music"
+    embedding_model: str = "clap-htsat-large"
     embedding_dim: int = 512
 ```
 
@@ -662,6 +662,7 @@ print(resp.model_dump_json(indent=2))
 | Docker Compose profiles require Compose v2.1+ | Low | Medium | `docker compose version` — most installs are v2+ now |
 | Alembic migration generates incorrect types for UUID | Low | Medium | Review generated migration manually before running |
 | Qdrant v1.16.3 image not yet on Docker Hub | Very Low | Low | Pin to v1.16.2 if v1.16.3 is unavailable |
+| [Updated] Qdrant client `vectors_count` removed in v1.16.2 | Medium | Medium | Use `indexed_vectors_count` instead; update all health checks and collection status queries accordingly |
 | Existing tests break due to lifespan change | Medium | Low | Update test fixtures to mock Qdrant client |
 
 ## Edge Cases & Gotchas
@@ -670,6 +671,8 @@ print(resp.model_dump_json(indent=2))
 2. **Docker volume persistence**: `qdrant_data` volume persists across `docker compose down`. Use `docker compose down -v` to fully reset.
 3. **CORS origins**: Adding Qdrant doesn't affect CORS, but ensure the service port hasn't changed.
 4. **`.env` vs `.env.example`**: Never commit `.env`. Only commit `.env.example`. Developers copy and customize.
+5. **[Updated] Olaf bundles its own dependencies**: Olaf includes its own pffft and LMDB libraries. Homebrew `fftw` and `lmdb` are NOT required as Olaf dependencies. Do not list them as system prerequisites for Olaf.
+6. **[Updated] Qdrant `vectors_count` field removed**: As of Qdrant v1.16.2, the `vectors_count` field was removed from collection info responses. Use `indexed_vectors_count` in all health checks, status queries, and monitoring code.
 
 ---
 

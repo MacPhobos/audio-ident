@@ -163,6 +163,14 @@ cd audio-ident-service && uv run pytest tests/test_audio_dedup.py -v
 
 Based on Phase 1 Prototype 1 results. The compiled Olaf library and CFFI wrapper from prototyping should be productionized here.
 
+**Phase 1 findings:**
+- Olaf bundles its own pffft (FFT) and LMDB — does NOT need Homebrew `fftw` or `lmdb` packages
+- Olaf output is **comma-separated** CSV (not semicolons)
+- On macOS, the CFFI wrapper may need an `install_name_tool` fix to set absolute library paths:
+  ```bash
+  install_name_tool -id "@rpath/libolaf.dylib" /path/to/libolaf.dylib
+  ```
+
 ### 4.2 Create Fingerprint Module
 
 **File**: `audio-ident-service/app/audio/fingerprint.py` (NEW)
@@ -213,8 +221,8 @@ ls -la data/olaf_db/  # Should contain data.mdb, lock.mdb
 ### 5.1 Install Dependencies
 
 ```bash
-cd audio-ident-service && uv add laion-clap numpy
-# Note: laion-clap pulls in torch as a dependency
+cd audio-ident-service && uv add transformers torch numpy
+# Note: Uses HuggingFace Transformers CLAP (laion/larger_clap_music_and_speech) — NOT laion-clap
 ```
 
 ### 5.2 Create Embedding Module
@@ -222,8 +230,26 @@ cd audio-ident-service && uv add laion-clap numpy
 **File**: `audio-ident-service/app/audio/embedding.py` (NEW)
 
 Implement chunked embedding generation:
-- `load_clap_model()` — load LAION CLAP larger_clap_music checkpoint
+- `load_clap_model()` — load HuggingFace Transformers CLAP (`laion/larger_clap_music_and_speech`, HTSAT-large)
 - `generate_chunked_embeddings(pcm_48k, track_id, metadata, qdrant)` — chunk audio into 10s windows with 5s hop, embed each chunk, upsert to Qdrant
+
+**Model loading** (replaces deprecated laion-clap API):
+```python
+from transformers import ClapModel, ClapProcessor
+processor = ClapProcessor.from_pretrained("laion/larger_clap_music_and_speech")
+model = ClapModel.from_pretrained("laion/larger_clap_music_and_speech")
+model.eval()
+```
+
+**Embedding generation per chunk** (replaces `get_audio_embedding_from_data`):
+```python
+import torch
+
+inputs = processor(audios=[audio_48k], sampling_rate=48000, return_tensors="pt")
+with torch.no_grad():
+    embedding = model.get_audio_features(**inputs)
+embedding_np = embedding.numpy()  # shape: (1, 512) — convert to numpy for Qdrant
+```
 
 Chunking parameters (from 03-embeddings-and-qdrant.md §3.3):
 - Window: 10 seconds (CLAP's native input length)
@@ -273,7 +299,8 @@ Upsert in batches of 100 points to avoid oversized requests (per 07-deliverables
 ```bash
 cd audio-ident-service && uv run pytest tests/test_audio_embedding.py -v
 curl "http://localhost:6333/collections/audio_embeddings" | python -m json.tool
-# Should show vectors_count matching expected chunk count
+# Should show indexed_vectors_count matching expected chunk count
+# Note: vectors_count was removed in Qdrant v1.16.2; use indexed_vectors_count instead
 ```
 
 ---
@@ -378,8 +405,8 @@ Per 08-devils-advocate-review.md (Missing Risk #6):
 - Process files **sequentially** (one at a time) to limit memory
 - A 30-minute file produces ~46MB of 48kHz PCM — acceptable for a single file
 - Don't accumulate PCM buffers across files — process and discard
-- CLAP model stays in memory (~600MB-1GB) throughout the batch
-- If running on <8GB RAM, consider setting `OMP_NUM_THREADS=1` to limit PyTorch memory
+- CLAP model stays in memory (~844 MB peak with HF Transformers) throughout the batch
+- If running on <16GB RAM (dev) or <32GB RAM (production), consider setting `OMP_NUM_THREADS=1` to limit PyTorch memory
 
 ---
 
@@ -418,7 +445,7 @@ The pipeline must gracefully handle:
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
 | Olaf CFFI compilation fails in production environment | Medium | High | Validated in Phase 1; Docker build pins all deps |
-| laion-clap dependency conflicts (numpy/torch) | Medium | Medium | Validated in Phase 1; HuggingFace Transformers as alt |
+| ~~laion-clap dependency conflicts (numpy/torch)~~ | ~~Medium~~ | ~~Medium~~ | **RETIRED** — Switched to HuggingFace Transformers CLAP; no laion-clap dependency |
 | Full 20K ingestion takes too long (>24h CPU) | Medium | Low | Can parallelize with GPU for embeddings; fingerprinting is fast |
 | Chromaprint content dedup O(n) scaling | Low | Low | Acceptable at 20K; optimize at 100K+ (add indexed hash column) |
 | 48kHz PCM memory for long tracks | Low | Medium | All PCM decoded on-the-fly (no disk cache); stream per chunk for very long tracks |
@@ -479,7 +506,7 @@ rm -rf audio-ident-service/app/ingest/
 
 1. **Olaf LMDB locking during concurrent operations.** LMDB allows only one writer at a time. If `make ingest` is running and someone queries via the search API (Phase 4a), the Olaf LMDB read shouldn't block — LMDB supports concurrent readers. But if two ingestion processes run simultaneously, one will get a lock error. The plan should document this single-writer constraint.
 
-2. **CLAP model memory during batch processing.** The plan notes "CLAP model stays in memory (~600MB-1GB) throughout the batch" but doesn't account for PyTorch peak memory during inference. With a 10s chunk at 48kHz, the intermediate tensors may spike to 2-3GB. If running on an 8GB machine with PostgreSQL and Qdrant also in memory, this could cause OOM kills.
+2. **CLAP model memory during batch processing.** The plan notes "CLAP model stays in memory (~844 MB peak) throughout the batch" [Updated: reduced from ~1,578 MB with laion-clap to ~844 MB with HF Transformers]. If running on a <16GB machine with PostgreSQL and Qdrant also in memory, this could cause OOM kills. Production recommendation: 32GB minimum.
 
 3. **Chromaprint `pyacoustid` requires `fpcalc` binary.** The plan installs `libchromaprint-dev` (the library) and `pyacoustid` (Python wrapper), but `pyacoustid` actually calls the `fpcalc` command-line tool, not the library directly. On some platforms, `fpcalc` must be installed separately. Verify: `which fpcalc`.
 
@@ -489,7 +516,7 @@ rm -rf audio-ident-service/app/ingest/
 
 1. **40h (5 days) is likely underestimated.** The Olaf CFFI integration alone (Step 4) was estimated at 8h, but this is a C library integration requiring: understanding Olaf's C API, writing CFFI declarations, handling memory management, testing across platforms. Research doc 08-devils-advocate-review.md identified this as a critical risk. Budget 12-16h.
 
-2. **Step 5 (CLAP + Qdrant) may hit dependency conflicts.** Research flagged `laion-clap` installation issues (00-reconciliation-summary.md §6 open question #3). If `laion-clap` conflicts with other packages (numpy version, torch version), resolving this could add 0.5-1 day.
+2. **~~RESOLVED~~ Step 5 (CLAP + Qdrant) may hit dependency conflicts.** [Updated: Switched from `laion-clap` to HuggingFace Transformers CLAP, eliminating the dependency conflict risk. HF Transformers has well-maintained PyTorch compatibility.]
 
 3. **The pipeline processes files sequentially "to manage memory."** For 20K tracks, sequential processing at ~30s per track (decode + fingerprint + embed) is ~167 hours. Even for a test set of 100 tracks, that's ~50 minutes. The plan should provide expected wall-clock times for different corpus sizes.
 

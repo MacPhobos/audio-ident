@@ -170,7 +170,7 @@ from app.search.vibe import run_vibe_lane
 # Budget: preprocessing (ffmpeg decode) ~1s + max(exact, vibe) <=4s = 5s total.
 # Lanes run in parallel, so the per-lane timeouts must fit within 4s.
 EXACT_TIMEOUT_SECONDS = 3.0   # Olaf LMDB lookup is fast (<500ms typical)
-VIBE_TIMEOUT_SECONDS = 4.0    # CLAP inference (~1-3s) + Qdrant query (~200ms)
+VIBE_TIMEOUT_SECONDS = 4.0    # CLAP inference (~0.2s HF Transformers) + Qdrant query (~200ms)
 TOTAL_REQUEST_TIMEOUT = 5.0   # Hard cap on total request time (including preprocessing)
 
 
@@ -239,7 +239,7 @@ async def orchestrate_search(
 | Content type validation | ~1ms | — | magic bytes check |
 | ffmpeg decode (dual rate) | ~200ms | **1s** | Two parallel ffmpeg subprocesses |
 | Olaf fingerprint extraction + query | ~100-300ms | **3s** (exact lane timeout) | LMDB lookup is fast; run_in_executor for CFFI |
-| CLAP embedding inference | ~1-3s (CPU) | **4s** (vibe lane timeout) | The bottleneck |
+| CLAP embedding inference | ~0.2s (CPU, HF Transformers) | **4s** (vibe lane timeout) | [Updated] p50=0.208s with HF Transformers HTSAT-large |
 | Qdrant nearest neighbor query | ~50-200ms | (included in vibe timeout) | HNSW with ef=128 |
 | Chunk aggregation + DB lookup | ~50ms | (included in vibe timeout) | In-memory + single SQL query |
 | **Total (BOTH mode)** | **~1.5-4s** | **5s hard cap** | preprocessing (1s) + max(exact, vibe) (4s) |
@@ -266,7 +266,9 @@ async def orchestrate_search(
 
 ### 3.1 Pre-load in Lifespan Handler
 
-Update the lifespan handler from Phase 2 to include CLAP model loading:
+Update the lifespan handler from Phase 2 to include CLAP model loading.
+
+> **[Updated]** Phase 1 validation confirmed that HuggingFace Transformers loads the CLAP model in ~1.1s (vs 22.2s with the old laion-clap package). Standard health check `initialDelaySeconds` of 5-10s is sufficient. Memory footprint is ~844 MB peak (vs 1,578 MB with laion-clap).
 
 **File**: `audio-ident-service/app/main.py` (modify lifespan)
 
@@ -276,27 +278,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 1. Check Postgres (existing)
     # 2. Check Qdrant (existing)
 
-    # 3. Pre-load CLAP model
+    # 3. Pre-load CLAP model (HuggingFace Transformers)
     import time as _time
     t_model = _time.perf_counter()
-    logger.info("Loading CLAP embedding model...")
+    logger.info("Loading CLAP embedding model (HF Transformers)...")
 
-    from app.audio.embedding import load_clap_model
-    clap_model = load_clap_model()
-    app.state.clap_model = clap_model
+    from transformers import ClapModel, ClapProcessor
+    processor = ClapProcessor.from_pretrained("laion/larger_clap_music_and_speech")
+    model = ClapModel.from_pretrained("laion/larger_clap_music_and_speech")
+    model.eval()
+    app.state.clap_model = model
+    app.state.clap_processor = processor
 
     load_time = _time.perf_counter() - t_model
     logger.info(f"CLAP model loaded in {load_time:.1f}s")
-    if load_time > 10:
+    if load_time > 5:
         logger.warning(
-            f"CLAP model load took {load_time:.1f}s — "
-            "consider caching model weights in Docker image"
+            f"CLAP model load took {load_time:.1f}s (expected ~1s with HF Transformers) — "
+            "investigate network or disk issues"
         )
 
     # 4. Warm-up inference (prevent cold-start latency on first request)
     import numpy as np
     warmup_audio = np.zeros(48000 * 5, dtype=np.float32)  # 5s silence
-    _ = clap_model.get_audio_embedding_from_data(x=warmup_audio, use_tensor=False)
+    inputs = processor(audios=[warmup_audio], sampling_rate=48000, return_tensors="pt")
+    _ = model.get_audio_features(**inputs)
     logger.info("CLAP warm-up inference complete")
 
     yield
@@ -493,7 +499,7 @@ Test cases:
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| CLAP model load delays startup by >15s | Medium | Medium | Log warning; consider baking model into Docker image |
+| [Updated] CLAP model load time | Low | Low | ~1.1s with HF Transformers (risk retired); warn if >5s indicating network/disk issues |
 | python-magic requires libmagic system dep | Low | Medium | Document in CLAUDE.md; add to Dockerfile |
 | asyncio.gather masks lane errors silently | Low | Medium | Log exceptions from return_exceptions; add metrics |
 | First request after restart is slow (cold JIT) | Low | Low | Warm-up inference in lifespan |
@@ -508,6 +514,23 @@ rm audio-ident-service/app/search/orchestrator.py
 # Remove python-magic dependency
 cd audio-ident-service && uv remove python-magic
 ```
+
+---
+
+## Memory Budget
+
+> **[Updated]** Phase 1 validation confirmed the following memory characteristics with HF Transformers.
+
+| Component | Memory | Notes |
+|-----------|--------|-------|
+| CLAP model (HF Transformers HTSAT-large) | ~844 MB peak | Down from 1,578 MB with laion-clap |
+| Per-request overhead | ~50-100 MB | Audio buffers + intermediate tensors |
+| Qdrant (at 940K vectors) | ~2-4 GB | Depends on HNSW parameters |
+| PostgreSQL | ~256-512 MB | Shared buffers |
+
+**Recommendations**:
+- **Production**: 32 GB RAM minimum (CLAP + Qdrant at scale + headroom for concurrent requests)
+- **Development**: 16 GB sufficient (smaller Qdrant collections, single-user)
 
 ---
 
@@ -544,7 +567,7 @@ cd audio-ident-service && uv remove python-magic
 
 4. **Error response status codes are inconsistent.** Step 4 says "Invalid audio format" returns 422, but Step 1.2 returns 400 with `UNSUPPORTED_FORMAT`. The contract (Phase 2 Step 1.1) also says 400. Pick one status code and use it consistently — suggest 422 (Unprocessable Entity) since the server understood the request but can't process the audio.
 
-5. **No rate limiting or request queuing.** CLAP inference is CPU-bound and takes 1-3s. If 5 concurrent requests arrive, they all compete for CPU, and each takes 5-15s instead of 1-3s. The plan should either: (a) add an asyncio.Semaphore to limit concurrent CLAP inferences, or (b) document that the system is designed for single-user/low-concurrency use.
+5. **No rate limiting or request queuing.** [Updated] CLAP inference is CPU-bound and takes ~0.2s per request with HF Transformers (down from 1-3s). CPU contention is less severe but still relevant under high concurrency. The plan should either: (a) add an asyncio.Semaphore to limit concurrent CLAP inferences, or (b) document that the system is designed for single-user/low-concurrency use.
 
 6. **Upload validation reads the entire file into memory.** `content = await audio.read()` loads up to 10MB into RAM per request. For concurrent requests, this is 10MB × N. FastAPI's `UploadFile` supports streaming via `read(size)` — consider reading in chunks for the size check, then seeking back for processing.
 
@@ -560,7 +583,7 @@ cd audio-ident-service && uv remove python-magic
 
 1. **28h (3.5 days) seems high for what's essentially wiring.** The orchestrator is ~50 lines of code. Upload validation is ~20 lines. Error handling is routing logic. The bulk of the work (search lanes, decode, embedding) is already done in Phases 3-4. 2 days (16h) seems more realistic unless integration testing reveals issues.
 
-2. **The CLAP warm-up inference during startup blocks the entire application.** `model.get_audio_embedding_from_data(x=warmup_audio, use_tensor=False)` takes 1-3s on CPU. During this time, the application doesn't accept connections. If deployed behind a load balancer with health checks, the health check may fail during startup. Consider making warm-up async or accepting the cold-start penalty.
+2. **[Updated] The CLAP warm-up inference during startup blocks the entire application.** With HF Transformers, warm-up inference takes ~0.2s (p50) on CPU, making this a non-issue. Combined with the ~1.1s model load, total startup CLAP overhead is ~1.3s. Standard health check `initialDelaySeconds` of 5-10s is sufficient.
 
 ### Missing Dependencies
 
