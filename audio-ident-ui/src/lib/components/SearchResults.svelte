@@ -15,10 +15,7 @@
 	// Tab priority: if top exact match has high confidence, show that first
 	let defaultTab = $derived.by<'exact' | 'vibe'>(() => {
 		if (!response) return 'exact';
-		if (
-			response.exact_matches.length > 0 &&
-			response.exact_matches[0].confidence >= 0.85
-		) {
+		if (response.exact_matches.length > 0 && response.exact_matches[0].confidence >= 0.85) {
 			return 'exact';
 		}
 		if (response.vibe_matches.length > 0 && response.exact_matches.length === 0) {
@@ -109,7 +106,7 @@
 			{/each}
 		</div>
 
-	<!-- Error State -->
+		<!-- Error State -->
 	{:else if error}
 		<div
 			class="flex flex-col items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-6 py-8"
@@ -122,7 +119,7 @@
 			</p>
 		</div>
 
-	<!-- No Results -->
+		<!-- No Results -->
 	{:else if response && !hasAnyResults}
 		<div class="flex flex-col items-center gap-3 rounded-xl border bg-white px-6 py-8">
 			<Search class="h-8 w-8 text-gray-400" />
@@ -135,7 +132,7 @@
 			</ul>
 		</div>
 
-	<!-- Results -->
+		<!-- Results -->
 	{:else if response && hasAnyResults}
 		<!-- Tabs -->
 		<div class="mb-4 flex gap-1 rounded-lg bg-gray-100 p-1" role="tablist">
@@ -149,9 +146,7 @@
 				onclick={() => setTab('exact')}
 				onkeydown={handleTabKeydown}
 				class="flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors
-					{currentTab === 'exact'
-					? 'bg-white text-gray-900 shadow-sm'
-					: 'text-gray-600 hover:text-gray-900'}"
+					{currentTab === 'exact' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}"
 			>
 				<Fingerprint class="h-4 w-4" />
 				Exact ID
@@ -171,14 +166,14 @@
 				onclick={() => setTab('vibe')}
 				onkeydown={handleTabKeydown}
 				class="flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors
-					{currentTab === 'vibe'
-					? 'bg-white text-gray-900 shadow-sm'
-					: 'text-gray-600 hover:text-gray-900'}"
+					{currentTab === 'vibe' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}"
 			>
 				<Waves class="h-4 w-4" />
 				Similar Vibe
 				{#if hasVibe}
-					<span class="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700">
+					<span
+						class="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700"
+					>
 						{response.vibe_matches.length}
 					</span>
 				{/if}
@@ -189,22 +184,21 @@
 		<div aria-live="polite">
 			<!-- Exact Matches Panel -->
 			{#if currentTab === 'exact'}
-				<div
-					id="panel-exact"
-					role="tabpanel"
-					aria-labelledby="tab-exact"
-					class="space-y-3"
-				>
+				<div id="panel-exact" role="tabpanel" aria-labelledby="tab-exact" class="space-y-3">
 					{#if !hasExact}
 						<div class="rounded-xl border bg-white px-6 py-6 text-center">
 							<p class="text-sm text-gray-500">No exact fingerprint matches found.</p>
-							<p class="mt-1 text-xs text-gray-400">Try the "Similar Vibe" tab for embedding-based results.</p>
+							<p class="mt-1 text-xs text-gray-400">
+								Try the "Similar Vibe" tab for embedding-based results.
+							</p>
 						</div>
 					{:else}
 						{#each response.exact_matches as match, i}
 							<div class="rounded-xl border bg-white p-4 transition-shadow hover:shadow-md">
 								<div class="flex items-start gap-3">
-									<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+									<div
+										class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"
+									>
 										<Music class="h-5 w-5" />
 									</div>
 									<div class="min-w-0 flex-1">
@@ -244,16 +238,13 @@
 
 			<!-- Vibe Matches Panel -->
 			{#if currentTab === 'vibe'}
-				<div
-					id="panel-vibe"
-					role="tabpanel"
-					aria-labelledby="tab-vibe"
-					class="space-y-3"
-				>
+				<div id="panel-vibe" role="tabpanel" aria-labelledby="tab-vibe" class="space-y-3">
 					{#if !hasVibe}
 						<div class="rounded-xl border bg-white px-6 py-6 text-center">
 							<p class="text-sm text-gray-500">No similar tracks found.</p>
-							<p class="mt-1 text-xs text-gray-400">Try the "Exact ID" tab for fingerprint-based results.</p>
+							<p class="mt-1 text-xs text-gray-400">
+								Try the "Exact ID" tab for fingerprint-based results.
+							</p>
 						</div>
 					{:else}
 						{#each response.vibe_matches as match, i}
@@ -282,7 +273,9 @@
 											{match.embedding_model}
 										</p>
 									</div>
-									<span class="shrink-0 rounded-full bg-purple-100 px-2.5 py-1 text-xs font-semibold text-purple-800">
+									<span
+										class="shrink-0 rounded-full bg-purple-100 px-2.5 py-1 text-xs font-semibold text-purple-800"
+									>
 										{(match.similarity * 100).toFixed(0)}%
 									</span>
 								</div>

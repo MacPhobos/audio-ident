@@ -5,7 +5,7 @@
 	import AudioRecorder from '$lib/components/AudioRecorder.svelte';
 	import AudioUploader from '$lib/components/AudioUploader.svelte';
 	import SearchResults from '$lib/components/SearchResults.svelte';
-	import { Mic, Upload, Lightbulb, ArrowLeft } from 'lucide-svelte';
+	import { Mic, Upload, Lightbulb } from 'lucide-svelte';
 
 	// ---------------------------------------------------------------------------
 	// State
@@ -26,35 +26,33 @@
 	// Mutation
 	// ---------------------------------------------------------------------------
 
-	const mutation = createMutation<SearchResponse, Error, { blob: Blob; duration: number }>(
-		() => ({
-			mutationFn: async ({ blob }: { blob: Blob; duration: number }) => {
-				// Cancel any previous in-flight request
-				if (abortController) {
-					abortController.abort();
-				}
-				abortController = new AbortController();
-
-				return searchAudio(blob, searchMode, 10, abortController.signal);
-			},
-			onSuccess: (data: SearchResponse) => {
-				searchResponse = data;
-				searchError = null;
-				pageState = 'results';
-			},
-			onError: (err: Error) => {
-				if (err instanceof ApiRequestError) {
-					searchError = err.message;
-				} else if (err.name === 'AbortError') {
-					// Cancelled by user or new search, do not update state
-					return;
-				} else {
-					searchError = 'An unexpected error occurred. Please try again.';
-				}
-				pageState = 'results';
+	const mutation = createMutation<SearchResponse, Error, { blob: Blob; duration: number }>(() => ({
+		mutationFn: async ({ blob }: { blob: Blob; duration: number }) => {
+			// Cancel any previous in-flight request
+			if (abortController) {
+				abortController.abort();
 			}
-		})
-	);
+			abortController = new AbortController();
+
+			return searchAudio(blob, searchMode, 10, abortController.signal);
+		},
+		onSuccess: (data: SearchResponse) => {
+			searchResponse = data;
+			searchError = null;
+			pageState = 'results';
+		},
+		onError: (err: Error) => {
+			if (err instanceof ApiRequestError) {
+				searchError = err.message;
+			} else if (err.name === 'AbortError') {
+				// Cancelled by user or new search, do not update state
+				return;
+			} else {
+				searchError = 'An unexpected error occurred. Please try again.';
+			}
+			pageState = 'results';
+		}
+	}));
 
 	// ---------------------------------------------------------------------------
 	// Handlers
@@ -92,20 +90,11 @@
 	<title>Search - audio-ident</title>
 </svelte:head>
 
-<main class="mx-auto max-w-2xl px-4 py-8 sm:py-12">
+<div class="mx-auto max-w-2xl px-4 py-8 sm:py-12">
 	<!-- Header -->
 	<header class="mb-8 text-center">
-		<a
-			href="/"
-			class="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
-		>
-			<ArrowLeft class="h-4 w-4" />
-			Home
-		</a>
 		<h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Identify Audio</h1>
-		<p class="mt-2 text-gray-500">
-			Record a clip or upload a file to find matching tracks
-		</p>
+		<p class="mt-2 text-gray-500">Record a clip or upload a file to find matching tracks</p>
 	</header>
 
 	<!-- Search Mode Selector -->
@@ -135,9 +124,7 @@
 				aria-selected={inputMode === 'record'}
 				onclick={() => switchInputMode('record')}
 				class="flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-colors
-					{inputMode === 'record'
-					? 'bg-white text-gray-900 shadow-sm'
-					: 'text-gray-600 hover:text-gray-900'}"
+					{inputMode === 'record' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}"
 			>
 				<Mic class="h-4 w-4" />
 				Record
@@ -147,9 +134,7 @@
 				aria-selected={inputMode === 'upload'}
 				onclick={() => switchInputMode('upload')}
 				class="flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-colors
-					{inputMode === 'upload'
-					? 'bg-white text-gray-900 shadow-sm'
-					: 'text-gray-600 hover:text-gray-900'}"
+					{inputMode === 'upload' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}"
 			>
 				<Upload class="h-4 w-4" />
 				Upload
@@ -161,9 +146,7 @@
 	{#if pageState === 'idle' || pageState === 'recording'}
 		<section class="rounded-xl border bg-white p-6">
 			{#if inputMode === 'record'}
-				<AudioRecorder
-					onRecordingComplete={handleRecordingComplete}
-				/>
+				<AudioRecorder onRecordingComplete={handleRecordingComplete} />
 
 				<!-- Recording Tips -->
 				<div class="mt-6 rounded-lg bg-amber-50 p-4">
@@ -187,12 +170,11 @@
 	<!-- Searching State -->
 	{#if pageState === 'searching'}
 		<section class="rounded-xl border bg-white p-8 text-center">
-			<div class="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600">
-			</div>
+			<div
+				class="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600"
+			></div>
 			<p class="font-medium text-gray-700">Searching for matches...</p>
-			<p class="mt-1 text-sm text-gray-500">
-				Analyzing audio fingerprint and embedding
-			</p>
+			<p class="mt-1 text-sm text-gray-500">Analyzing audio fingerprint and embedding</p>
 			<button
 				onclick={resetSearch}
 				class="mt-4 text-sm text-gray-500 underline hover:text-gray-700"
@@ -205,11 +187,7 @@
 	<!-- Results Section -->
 	{#if pageState === 'results'}
 		<section class="space-y-4">
-			<SearchResults
-				response={searchResponse}
-				isLoading={false}
-				error={searchError}
-			/>
+			<SearchResults response={searchResponse} isLoading={false} error={searchError} />
 
 			<div class="text-center">
 				<button
@@ -222,4 +200,4 @@
 			</div>
 		</section>
 	{/if}
-</main>
+</div>

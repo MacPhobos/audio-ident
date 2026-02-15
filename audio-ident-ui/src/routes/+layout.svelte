@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
+	import NavBar from '$lib/components/NavBar.svelte';
 
 	let { children } = $props();
 
@@ -16,6 +17,9 @@
 
 <QueryClientProvider client={queryClient}>
 	<div class="min-h-screen bg-gray-50 text-gray-900">
-		{@render children()}
+		<NavBar />
+		<main>
+			{@render children()}
+		</main>
 	</div>
 </QueryClientProvider>

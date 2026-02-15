@@ -180,7 +180,8 @@
 			if (err instanceof DOMException) {
 				switch (err.name) {
 					case 'NotAllowedError':
-						error = 'Microphone access denied. Please allow microphone access in your browser settings.';
+						error =
+							'Microphone access denied. Please allow microphone access in your browser settings.';
 						break;
 					case 'NotFoundError':
 						error = 'No microphone found. Please connect a microphone and try again.';
@@ -284,15 +285,9 @@
 				{@const barThreshold = (i + 1) / LEVEL_BARS}
 				{@const isActive = audioLevel >= barThreshold}
 				{@const barColor =
-					barThreshold > 0.8
-						? 'bg-red-500'
-						: barThreshold > 0.6
-							? 'bg-yellow-500'
-							: 'bg-green-500'}
+					barThreshold > 0.8 ? 'bg-red-500' : barThreshold > 0.6 ? 'bg-yellow-500' : 'bg-green-500'}
 				<div
-					class="w-2 rounded-sm transition-all duration-75 {isActive
-						? barColor
-						: 'bg-gray-200'}"
+					class="w-2 rounded-sm transition-all duration-75 {isActive ? barColor : 'bg-gray-200'}"
 					style="height: {isActive ? Math.max(8, (i + 1) * (64 / LEVEL_BARS)) : 8}px"
 				></div>
 			{/each}
@@ -342,8 +337,9 @@
 				: 'bg-red-600 hover:bg-red-700 text-white cursor-pointer'}"
 	>
 		{#if isPreparing}
-			<div class="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent">
-			</div>
+			<div
+				class="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent"
+			></div>
 		{:else if isRecording}
 			<Square class="h-6 w-6" />
 		{:else}
