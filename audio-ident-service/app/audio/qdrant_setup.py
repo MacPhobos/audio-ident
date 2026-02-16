@@ -17,6 +17,19 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE: int = 100  # Upsert batch size to avoid oversized requests
 
 
+def get_qdrant_client() -> AsyncQdrantClient:
+    """Create and return an AsyncQdrantClient using application settings.
+
+    Reads ``QDRANT_URL`` and ``QDRANT_API_KEY`` from the global settings
+    object.  This is intended for use outside the FastAPI lifespan (e.g.
+    the batch-ingestion CLI) where ``app.state.qdrant`` is not available.
+    """
+    return AsyncQdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key if settings.qdrant_api_key else None,
+    )
+
+
 async def ensure_collection(client: AsyncQdrantClient) -> None:
     """Create the audio embeddings collection if it doesn't exist.
 
