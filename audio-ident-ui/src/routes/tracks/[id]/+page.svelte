@@ -10,7 +10,9 @@
 		formatSampleRate,
 		formatChannels
 	} from '$lib/format';
-	import { ArrowLeft, Music, AlertCircle, Search } from 'lucide-svelte';
+	import { ArrowLeft, Music, AlertCircle, Search, Play } from 'lucide-svelte';
+	import PlayerDialog from '$lib/components/PlayerDialog.svelte';
+	import type { TrackInfo } from '$lib/api/client';
 
 	// ---------------------------------------------------------------------------
 	// State
@@ -47,6 +49,33 @@
 	);
 
 	let embeddingIndexed = $derived(track?.embedding_model != null && track?.embedding_dim != null);
+
+	// ---------------------------------------------------------------------------
+	// Player dialog state
+	// ---------------------------------------------------------------------------
+
+	let playerOpen = $state(false);
+
+	let playerTrackInfo = $derived<TrackInfo | null>(
+		track
+			? {
+					id: track.id,
+					title: track.title,
+					artist: track.artist ?? null,
+					album: track.album ?? null,
+					duration_seconds: track.duration_seconds,
+					ingested_at: track.ingested_at
+				}
+			: null
+	);
+
+	function openPlayer() {
+		playerOpen = true;
+	}
+
+	function closePlayer() {
+		playerOpen = false;
+	}
 </script>
 
 <svelte:head>
@@ -157,7 +186,7 @@
 				>
 					<Music class="h-6 w-6" />
 				</div>
-				<div class="min-w-0">
+				<div class="min-w-0 flex-1">
 					<h1 class="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
 						{track.title}
 					</h1>
@@ -169,6 +198,14 @@
 						{/if}
 					</p>
 				</div>
+				<button
+					onclick={openPlayer}
+					class="flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+					aria-label="Play {track.title}"
+				>
+					<Play class="h-4 w-4" />
+					<span class="hidden sm:inline">Play</span>
+				</button>
 			</div>
 		</div>
 
@@ -290,4 +327,7 @@
 			</div>
 		</div>
 	{/if}
+
+	<!-- Audio Player Dialog -->
+	<PlayerDialog track={playerTrackInfo} open={playerOpen} onClose={closePlayer} />
 </div>

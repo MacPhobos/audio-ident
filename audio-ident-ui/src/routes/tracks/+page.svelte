@@ -3,15 +3,17 @@
 	import { goto } from '$app/navigation';
 	import { onDestroy } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { fetchTracks, type PaginatedTrackResponse } from '$lib/api/client';
+	import { fetchTracks, type PaginatedTrackResponse, type TrackInfo } from '$lib/api/client';
 	import { formatDuration } from '$lib/format';
+	import PlayerDialog from '$lib/components/PlayerDialog.svelte';
 	import {
 		Library,
 		Search,
 		ChevronLeft,
 		ChevronRight,
 		AlertCircle,
-		RefreshCw
+		RefreshCw,
+		Play
 	} from 'lucide-svelte';
 
 	// ---------------------------------------------------------------------------
@@ -88,6 +90,23 @@
 		const url = new URL(page.url);
 		url.searchParams.set('page', String(p));
 		goto(url.toString());
+	}
+
+	// ---------------------------------------------------------------------------
+	// Player dialog state
+	// ---------------------------------------------------------------------------
+
+	let playerTrack = $state<TrackInfo | null>(null);
+	let playerOpen = $state(false);
+
+	function openPlayer(track: TrackInfo) {
+		playerTrack = track;
+		playerOpen = true;
+	}
+
+	function closePlayer() {
+		playerOpen = false;
+		playerTrack = null;
 	}
 </script>
 
@@ -215,6 +234,9 @@
 						<tr
 							class="border-b bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
 						>
+							<th scope="col" class="w-12 px-4 py-3">
+								<span class="sr-only">Play</span>
+							</th>
 							<th scope="col" class="px-4 py-3">Title</th>
 							<th scope="col" class="px-4 py-3">Artist</th>
 							<th scope="col" class="px-4 py-3">Album</th>
@@ -224,6 +246,15 @@
 					<tbody>
 						{#each tracks as track (track.id)}
 							<tr class="border-b last:border-b-0 transition-colors hover:bg-gray-50">
+								<td class="px-4 py-3">
+									<button
+										onclick={() => openPlayer(track)}
+										class="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-indigo-600"
+										aria-label="Play {track.title}"
+									>
+										<Play class="h-4 w-4" />
+									</button>
+								</td>
 								<td class="px-4 py-3">
 									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic route -->
 									<a
@@ -252,23 +283,29 @@
 		<!-- Mobile Cards (< 640px) -->
 		<div class="space-y-3 sm:hidden">
 			{#each tracks as track (track.id)}
-				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic route -->
-				<a
-					href="/tracks/{track.id}"
-					class="block rounded-xl border bg-white p-4 transition-shadow hover:shadow-md"
-				>
-					<p class="truncate font-medium text-gray-900">{track.title}</p>
-					{#if track.artist}
-						<p class="truncate text-sm text-gray-600">{track.artist}</p>
-					{/if}
-					<div class="mt-1 flex items-center gap-2 text-xs text-gray-400">
-						{#if track.album}
-							<span class="truncate">{track.album}</span>
-							<span>&middot;</span>
+				<div class="relative rounded-xl border bg-white p-4 transition-shadow hover:shadow-md">
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic route -->
+					<a href="/tracks/{track.id}" class="block pr-10">
+						<p class="truncate font-medium text-gray-900">{track.title}</p>
+						{#if track.artist}
+							<p class="truncate text-sm text-gray-600">{track.artist}</p>
 						{/if}
-						<span class="font-mono">{formatDuration(track.duration_seconds)}</span>
-					</div>
-				</a>
+						<div class="mt-1 flex items-center gap-2 text-xs text-gray-400">
+							{#if track.album}
+								<span class="truncate">{track.album}</span>
+								<span>&middot;</span>
+							{/if}
+							<span class="font-mono">{formatDuration(track.duration_seconds)}</span>
+						</div>
+					</a>
+					<button
+						onclick={() => openPlayer(track)}
+						class="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-indigo-600"
+						aria-label="Play {track.title}"
+					>
+						<Play class="h-4 w-4" />
+					</button>
+				</div>
 			{/each}
 		</div>
 
@@ -308,4 +345,7 @@
 			</nav>
 		{/if}
 	{/if}
+
+	<!-- Audio Player Dialog -->
+	<PlayerDialog track={playerTrack} open={playerOpen} onClose={closePlayer} />
 </div>

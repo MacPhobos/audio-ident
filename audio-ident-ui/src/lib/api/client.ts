@@ -105,6 +105,14 @@ function mimeToExtension(mime: string): string {
 // Public API
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the URL for streaming a track's audio file.
+ * Returns a URL string (not a fetch call) for use as an `<audio>` element `src`.
+ */
+export function trackAudioUrl(trackId: number | string): string {
+	return `${BASE_URL}/api/v1/tracks/${trackId}/audio`;
+}
+
 export function fetchHealth(): Promise<HealthResponse> {
 	return fetchJSON<HealthResponse>('/health');
 }
