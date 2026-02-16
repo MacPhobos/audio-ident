@@ -78,7 +78,7 @@ def generate_embedding(
         EmbeddingError: If embedding generation fails.
     """
     try:
-        inputs = processor(audios=[audio_48k], sampling_rate=SAMPLE_RATE, return_tensors="pt")
+        inputs = processor(audio=[audio_48k], sampling_rate=SAMPLE_RATE, return_tensors="pt")
         with torch.no_grad():
             raw_output = model.get_audio_features(**inputs)
 

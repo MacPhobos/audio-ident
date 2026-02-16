@@ -187,12 +187,7 @@ async def ingest_file(
                         "title": metadata.title or "",
                         "genre": "",
                     }
-                    count = await loop.run_in_executor(
-                        None,
-                        functools.partial(
-                            upsert_track_embeddings, qdrant_client, track_id, chunks, meta
-                        ),
-                    )
+                    count = await upsert_track_embeddings(qdrant_client, track_id, chunks, meta)
                     return len(chunks), count
                 return 0, 0
             except Exception as e:
@@ -294,7 +289,7 @@ async def ingest_directory(
     logger.info("Found %d audio files in %s", len(audio_files), directory)
 
     # Ensure Qdrant collection exists
-    ensure_collection(qdrant_client)
+    await ensure_collection(qdrant_client)
 
     # Process sequentially (Olaf LMDB is single-writer)
     for i, file_path in enumerate(audio_files, 1):

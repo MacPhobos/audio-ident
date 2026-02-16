@@ -86,7 +86,7 @@ rebuild-index: ## Drop computed data and rebuild from raw audio
 	@echo "Press Ctrl+C to cancel, or wait 5 seconds..."
 	@sleep 5
 	@echo "Clearing Olaf LMDB index..."
-	rm -rf $(SERVICE_DIR)/data/olaf_db/*
+	rm -rf $${OLAF_LMDB_PATH:-$(SERVICE_DIR)/data/olaf_db}/*
 	@echo "Dropping Qdrant collection..."
 	curl -sf -X DELETE "http://localhost:$${QDRANT_HTTP_PORT:-6333}/collections/$${QDRANT_COLLECTION_NAME:-audio_embeddings}" || true
 	@echo "Re-ingesting from raw audio..."

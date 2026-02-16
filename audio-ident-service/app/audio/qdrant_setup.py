@@ -7,7 +7,7 @@ Handles lazy collection creation with the correct schema:
 import logging
 import uuid
 
-from qdrant_client import QdrantClient, models
+from qdrant_client import AsyncQdrantClient, models
 
 from app.audio.embedding import AudioChunk
 from app.settings import settings
@@ -17,12 +17,7 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE: int = 100  # Upsert batch size to avoid oversized requests
 
 
-def get_qdrant_client() -> QdrantClient:
-    """Create a Qdrant client from settings."""
-    return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-
-
-def ensure_collection(client: QdrantClient) -> None:
+async def ensure_collection(client: AsyncQdrantClient) -> None:
     """Create the audio embeddings collection if it doesn't exist.
 
     Schema:
@@ -34,12 +29,12 @@ def ensure_collection(client: QdrantClient) -> None:
     collection_name = settings.qdrant_collection_name
 
     # Check if collection exists
-    collections = client.get_collections().collections
-    if any(c.name == collection_name for c in collections):
+    collections_response = await client.get_collections()
+    if any(c.name == collection_name for c in collections_response.collections):
         return
 
     # Create collection with full schema
-    client.create_collection(
+    await client.create_collection(
         collection_name=collection_name,
         vectors_config=models.VectorParams(
             size=settings.embedding_dim,
@@ -56,12 +51,12 @@ def ensure_collection(client: QdrantClient) -> None:
     )
 
     # Create payload indexes for filtered search
-    client.create_payload_index(
+    await client.create_payload_index(
         collection_name=collection_name,
         field_name="track_id",
         field_schema=models.PayloadSchemaType.KEYWORD,
     )
-    client.create_payload_index(
+    await client.create_payload_index(
         collection_name=collection_name,
         field_name="genre",
         field_schema=models.PayloadSchemaType.KEYWORD,
@@ -70,8 +65,8 @@ def ensure_collection(client: QdrantClient) -> None:
     logger.info("Created Qdrant collection '%s' with INT8 quantization", collection_name)
 
 
-def upsert_track_embeddings(
-    client: QdrantClient,
+async def upsert_track_embeddings(
+    client: AsyncQdrantClient,
     track_id: uuid.UUID,
     chunks: list[AudioChunk],
     metadata: dict[str, str] | None = None,
@@ -79,7 +74,7 @@ def upsert_track_embeddings(
     """Upsert all chunk embeddings for a track to Qdrant.
 
     Args:
-        client: Qdrant client.
+        client: Qdrant async client.
         track_id: Track UUID.
         chunks: List of AudioChunk with embeddings.
         metadata: Optional dict with artist, title, genre.
@@ -102,7 +97,7 @@ def upsert_track_embeddings(
     collection_name = settings.qdrant_collection_name
 
     # Ensure collection exists
-    ensure_collection(client)
+    await ensure_collection(client)
 
     # Build all points
     points: list[models.PointStruct] = []
@@ -134,7 +129,7 @@ def upsert_track_embeddings(
     # Upsert in batches
     for i in range(0, len(points), BATCH_SIZE):
         batch = points[i : i + BATCH_SIZE]
-        client.upsert(
+        await client.upsert(
             collection_name=collection_name,
             points=batch,
         )
@@ -148,17 +143,17 @@ def upsert_track_embeddings(
     return len(points)
 
 
-def delete_track_embeddings(
-    client: QdrantClient,
+async def delete_track_embeddings(
+    client: AsyncQdrantClient,
     track_id: uuid.UUID,
 ) -> None:
     """Delete all embeddings for a track from Qdrant.
 
     Args:
-        client: Qdrant client.
+        client: Qdrant async client.
         track_id: Track UUID to remove all chunks for.
     """
-    client.delete(
+    await client.delete(
         collection_name=settings.qdrant_collection_name,
         points_selector=models.FilterSelector(
             filter=models.Filter(

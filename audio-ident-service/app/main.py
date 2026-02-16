@@ -37,7 +37,9 @@ def _get_torch_device() -> str:
         if torch.cuda.is_available():
             return "cuda"
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return "mps"
+            # CLAP uses ops not yet supported on MPS (Placeholder storage error).
+            # Fall through to CPU until PyTorch/MPS support improves.
+            logger.info("MPS available but not used for CLAP (unsupported ops)")
     except ImportError:
         logger.warning("torch not installed, defaulting to CPU")
     return "cpu"
@@ -113,7 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         import numpy as np
 
         warmup_audio = np.zeros(48000 * 5, dtype=np.float32)  # 5s silence
-        inputs = processor(audios=[warmup_audio], sampling_rate=48000, return_tensors="pt")
+        inputs = processor(audio=[warmup_audio], sampling_rate=48000, return_tensors="pt")
         if device != "cpu":
             inputs = {k: v.to(device) for k, v in inputs.items()}
         _ = model.get_audio_features(**inputs)

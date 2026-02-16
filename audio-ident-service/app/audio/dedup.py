@@ -78,6 +78,8 @@ async def generate_chromaprint(pcm_16k_s16le: bytes, duration: float) -> str | N
             "16000",
             "-channels",
             "1",
+            "-format",
+            "s16le",
             "-length",
             str(int(duration)),
             "-signed",
