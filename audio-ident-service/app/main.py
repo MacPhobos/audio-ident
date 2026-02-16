@@ -148,6 +148,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
     )
 
     application.include_router(health.router)

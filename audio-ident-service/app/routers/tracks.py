@@ -1,21 +1,27 @@
-"""Track library endpoints — paginated listing and detail views."""
+"""Track library endpoints — paginated listing, detail views, and audio streaming."""
 
 from __future__ import annotations
 
+import logging
 import math
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audio.storage import raw_audio_path
 from app.db.session import get_db
 from app.models.track import Track
 from app.schemas.errors import ErrorDetail, ErrorResponse
 from app.schemas.pagination import PaginatedResponse, PaginationMeta
 from app.schemas.search import TrackInfo
 from app.schemas.track import TrackDetail
+from app.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tracks"])
 
@@ -137,3 +143,124 @@ async def get_track(
         )
 
     return _track_to_detail(track)
+
+
+# ---------------------------------------------------------------------------
+# Audio streaming
+# ---------------------------------------------------------------------------
+
+AUDIO_MIME_TYPES: dict[str, str] = {
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "flac": "audio/flac",
+    "ogg": "audio/ogg",
+    "webm": "audio/webm",
+    "mp4": "audio/mp4",
+    "m4a": "audio/mp4",
+}
+
+
+def _resolve_format(track: Track) -> str | None:
+    """Return the audio format for a track, falling back to file extension."""
+    if track.format:
+        return track.format.lower().lstrip(".")
+
+    # Fall back: try to extract extension from the stored file_path
+    stored_ext = Path(track.file_path).suffix.lstrip(".")
+    if stored_ext:
+        return stored_ext.lower()
+
+    return None
+
+
+@router.get(
+    "/tracks/{track_id}/audio",
+    response_model=None,
+    responses={
+        200: {"content": {"audio/mpeg": {}}, "description": "Full audio file"},
+        206: {"description": "Partial content (Range request)"},
+        404: {"description": "Track not found or file missing", "model": ErrorResponse},
+    },
+)
+async def get_track_audio(
+    track_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+) -> FileResponse | JSONResponse:
+    """Stream the audio file for a track.
+
+    Supports HTTP Range requests for seeking (206 Partial Content).
+    Starlette's FileResponse handles Range parsing, Content-Range,
+    Accept-Ranges, ETag, and Last-Modified headers automatically.
+    """
+    # 1. Look up track in DB
+    result = await db.execute(select(Track).where(Track.id == track_id))
+    track = result.scalar_one_or_none()
+
+    if track is None:
+        return JSONResponse(
+            status_code=404,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="NOT_FOUND",
+                    message=f"No track found with id {track_id}",
+                )
+            ).model_dump(),
+        )
+
+    # 2. Resolve audio format
+    fmt = _resolve_format(track)
+    if fmt is None:
+        return JSONResponse(
+            status_code=404,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="FILE_NOT_FOUND",
+                    message="Track has no format information; cannot locate audio file",
+                )
+            ).model_dump(),
+        )
+
+    # 3. Reconstruct file path from hash + format (not the stored file_path)
+    file_path = raw_audio_path(track.file_hash_sha256, fmt)
+
+    # 4. Defense-in-depth: validate path is within storage root
+    storage_root = Path(settings.audio_storage_root).resolve()
+    resolved_path = file_path.resolve()
+    if not str(resolved_path).startswith(str(storage_root)):
+        logger.warning(
+            "Path traversal blocked: resolved=%s, storage_root=%s, track_id=%s",
+            resolved_path,
+            storage_root,
+            track_id,
+        )
+        return JSONResponse(
+            status_code=404,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="FILE_NOT_FOUND",
+                    message="Audio file not found on disk",
+                )
+            ).model_dump(),
+        )
+
+    # 5. Check file exists on disk
+    if not resolved_path.is_file():
+        return JSONResponse(
+            status_code=404,
+            content=ErrorResponse(
+                error=ErrorDetail(
+                    code="FILE_NOT_FOUND",
+                    message="Audio file not found on disk",
+                )
+            ).model_dump(),
+        )
+
+    # 6. Determine MIME type from format
+    media_type = AUDIO_MIME_TYPES.get(fmt, "application/octet-stream")
+
+    # 7. Return FileResponse — Starlette handles Range, ETag, Content-Type
+    return FileResponse(
+        path=resolved_path,
+        media_type=media_type,
+        content_disposition_type="inline",
+    )

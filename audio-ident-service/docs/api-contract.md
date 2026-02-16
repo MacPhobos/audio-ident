@@ -1,7 +1,7 @@
 # audio-ident API Contract
 
-> **Version**: 1.1.0
-> **Last Updated**: 2026-02-14
+> **Version**: 1.2.0
+> **Last Updated**: 2026-02-16
 > **Status**: FROZEN - Changes require version bump and UI sync
 
 This document defines the API contract between `audio-ident-service` (FastAPI backend) and `audio-ident-ui` (SvelteKit frontend).
@@ -452,6 +452,43 @@ Retrieve full metadata for a single track, including fingerprint and embedding s
 
 ---
 
+### Track Audio
+
+#### `GET /api/v1/tracks/{id}/audio`
+
+Stream the raw audio file for a track. Returns the original ingested audio file with the appropriate content type. Supports HTTP Range requests for efficient seeking in browser `<audio>` elements.
+
+**Path Parameters**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | string (UUID) | Track identifier |
+
+**Response Headers**
+
+| Header | Value | Description |
+|--------|-------|-------------|
+| `Content-Type` | `audio/mpeg`, `audio/wav`, `audio/flac`, `audio/ogg`, etc. | Matches the stored audio format |
+| `Content-Length` | integer | File size in bytes (or range size for 206) |
+| `Accept-Ranges` | `bytes` | Indicates Range request support |
+| `Content-Range` | `bytes start-end/total` | Present on 206 Partial Content responses only |
+| `ETag` | string | Cache validator |
+| `Last-Modified` | HTTP date | File modification time |
+
+**Response** `200 OK` (full file) or `206 Partial Content` (range request)
+
+Binary audio data.
+
+**Error Codes**
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `NOT_FOUND` | 404 | Track with the given ID does not exist |
+| `FILE_NOT_FOUND` | 404 | Track exists in DB but audio file is missing from storage |
+| `VALIDATION_ERROR` | 400 | Invalid UUID format |
+
+---
+
 ## Pagination
 
 High volume list endpoints use consistent pagination.
@@ -496,6 +533,7 @@ High volume list endpoints use consistent pagination.
 | `AUDIO_TOO_LONG` | 400 | Audio clip exceeds 30 minutes |
 | `DIRECTORY_NOT_FOUND` | 400 | Server-side directory does not exist |
 | `NOT_FOUND` | 404 | Resource not found |
+| `FILE_NOT_FOUND` | 404 | Resource exists but associated file is missing from storage |
 | `RATE_LIMITED` | 429 | Too many requests |
 | `INTERNAL_ERROR` | 500 | Server error |
 | `SERVICE_UNAVAILABLE` | 503 | Backend service (Olaf, Qdrant, PostgreSQL) unavailable |
@@ -509,6 +547,7 @@ High volume list endpoints use consistent pagination.
 |------|-------|
 | `200 OK` | Successful GET, PATCH, POST (actions) |
 | `201 Created` | Successful POST (resource creation) |
+| `206 Partial Content` | Successful Range request (audio streaming) |
 | `204 No Content` | Successful DELETE |
 | `400 Bad Request` | Validation error |
 | `404 Not Found` | Resource not found |
@@ -553,6 +592,7 @@ Full authentication will be implemented in a future version.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2.0 | 2026-02-16 | Add track audio streaming endpoint (`GET /api/v1/tracks/{id}/audio`) |
 | 1.1.0 | 2026-02-14 | Add search, ingest, tracks list, track detail endpoints and types |
 | 1.0.0 | 2026-02-14 | Initial contract: health, version endpoints |
 
